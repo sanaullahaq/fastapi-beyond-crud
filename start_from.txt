@@ -1,0 +1,1 @@
+https://jod35.github.io/fastapi-beyond-crud-docs/site/chapter3/#:~:text=Conclusion-,Building%20a%20CRUD%20REST%20API,-What%20is%20CRUD
