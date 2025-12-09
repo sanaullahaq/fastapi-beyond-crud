@@ -56,6 +56,7 @@ async def create_user(user_data: User):
     return {'message':'User Created Successfully!', 'user': users[-1]}
 
 
+"""
 # inspect the headers information
 @app.get('/get_headers')
 async def get_all_request_headers(
@@ -77,4 +78,6 @@ async def get_all_request_headers(
     request_headers["Accept"] = accept
 
     return request_headers
-"""
+
+
+
