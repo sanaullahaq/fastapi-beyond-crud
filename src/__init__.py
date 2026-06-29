@@ -1,7 +1,6 @@
-from typing import Optional
-from fastapi import FastAPI, Header
-from src.books.schemas import User
+from fastapi import FastAPI
 from src.books.routes import book_router
+from src.auth.routes import auth_router
 from contextlib import asynccontextmanager
 
 from src.db.main import initdb
@@ -33,10 +32,11 @@ version_prefix =f"/api/{version}"
 
 app = FastAPI(
     title="Bookly",
-    description="A REST API for a book review web service",
+    description=description,
     version= version,
     lifespan=lifespan
 )
 
 
 app.include_router(book_router, prefix=f"{version_prefix}/books", tags=["books"])
+app.include_router(auth_router, prefix=f"{version_prefix}/auth", tags=["auth"])
