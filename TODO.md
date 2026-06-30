@@ -1,0 +1,2 @@
+- [] Rename the schemas with `schema` suffix
+- [] Rename the models with `model` suffix
