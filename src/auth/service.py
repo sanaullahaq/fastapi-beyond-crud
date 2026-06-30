@@ -1,12 +1,42 @@
 from sqlmodel.ext.asyncio.session import AsyncSession
-from src.books.schemas import BookCreateModel, BookUpdateModel
-from sqlmodel import select, desc
-from src.auth.models import User
-from datetime import datetime
+from src.auth.schemas import UserCreateModel
+from sqlmodel import select
+from src.db.models import User
+
+from src.auth.utils import hash_password
 
 
-class AuthService:
+class UserService:
     """
     This class provides methods to create, read, update, and delete books
     """
-    pass
+
+
+    async def get_user_by_email(self, email: str, session: AsyncSession):
+        statement = select(User).where(User.email==email)
+        
+        result = await session.exec(statement)
+
+        user = result.first()
+        
+        return user
+    
+
+    async def user_exists(self, email: str, session: AsyncSession):
+        user = await self.get_user_by_email(email=email, session=session)
+
+        return True if user is not None else False
+
+
+
+    async def create_user(self, user_data:UserCreateModel, session: AsyncSession) -> dict:
+        user_data_dict = user_data.model_dump()
+        
+        new_user = User(**user_data_dict)
+        new_user.password_hash = hash_password(user_data_dict["password"])
+        
+        session.add(new_user)
+        
+        await session.commit()
+        
+        return new_user

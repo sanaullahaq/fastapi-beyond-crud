@@ -4,11 +4,6 @@ import uuid
 from pydantic import BaseModel
 
 
-class User(BaseModel):
-    username: str
-    email: str
-
-
 class Book(BaseModel):
     uid: uuid.UUID
     title: str
