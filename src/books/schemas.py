@@ -4,33 +4,32 @@ import uuid
 from pydantic import BaseModel
 
 
-class Book(BaseModel):
-    uid: uuid.UUID
+class BookBase(BaseModel):
     title: str
     author: str
     publisher: str
-    published_date: date
     page_count: int
     language: str
+
+
+class BookCreate(BookBase):
+    """
+    This class is used to validate the request when creating a book
+    """
+
+    published_date: str
+
+
+class BookUpdate(BookBase):
+    """
+    This class is used to validate the request when updating a book
+    """
+
+    pass
+
+
+class BookOut(BookBase):
+    uid: uuid.UUID
+    published_date: date
     created_at: datetime
     updated_at: datetime
-
-
-class BookCreateModel(BaseModel):
-    """
-        This class is used to validate the request when creating or updating a book
-    """
-    title: str
-    author: str
-    publisher: str
-    published_date: str
-    page_count: int
-    language: str
-
-
-class BookUpdateModel(BaseModel):
-    title: str
-    author: str
-    publisher: str
-    page_count: int
-    language: str

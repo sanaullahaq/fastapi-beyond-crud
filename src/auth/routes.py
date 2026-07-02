@@ -1,9 +1,15 @@
-from typing import List
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from src.auth.schemas import UserModel, UserCreateModel
+from fastapi.responses import JSONResponse
+from src.auth.dependencies import AccessTokenBearer, RefreshTokenBearer
+from src.auth.schemas import UserLogin, UserOut, UserCreate
 from sqlmodel.ext.asyncio.session import AsyncSession
 from src.auth.service import UserService
+from src.auth.utils import create_access_token, verify_password
+from src.config import Config
 from src.db.main import get_session
+from src.db.redish import add_jti_to_blocklist
 
 
 auth_router = APIRouter()
@@ -11,10 +17,10 @@ user_service = UserService()
 
 
 @auth_router.post(
-    "/signup", status_code=status.HTTP_201_CREATED, response_model=UserModel
+    "/signup", status_code=status.HTTP_201_CREATED, response_model=UserOut
 )
 async def create_user_account(
-    user_data: UserCreateModel, session: AsyncSession = Depends(get_session)
+    user_data: UserCreate, session: AsyncSession = Depends(get_session)
 ) -> dict:
     email = user_data.email
 
@@ -29,3 +35,84 @@ async def create_user_account(
     new_user = await user_service.create_user(user_data=user_data, session=session)
 
     return new_user
+
+
+@auth_router.post("/login")
+async def login_users(
+    login_data: UserLogin, session: AsyncSession = Depends(get_session)
+) -> JSONResponse:
+    email = login_data.email
+    password = login_data.password
+
+    user = await user_service.get_user_by_email(email=email, session=session)
+
+    if user is not None:
+        password_valid = verify_password(
+            password=password, stored_hashed=user.password_hash
+        )
+
+        if password_valid:
+            access_token = create_access_token(
+                user_data={"email": user.email, "user_uid": str(user.uid)}
+            )
+
+            refresh_token = create_access_token(
+                user_data={"email": user.email, "user_uid": str(user.uid)},
+                refresh=True,
+                expiry=timedelta(days=Config.REFRESH_TOKEN_EXPIRY_DAYS),
+            )
+
+            return JSONResponse(
+                content={
+                    "message": "Login successful",
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "user": {"user": user.email, "uid": str(user.uid)},
+                }
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Email or Password"
+        )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Email or Password"
+    )
+
+
+@auth_router.get("/refresh_token")
+async def get_new_access_token(token_details: dict = Depends(RefreshTokenBearer())):
+    expiry_timestamp = token_details["exp"]
+
+    if datetime.fromtimestamp(expiry_timestamp) > datetime.now():
+        new_access_token = create_access_token(user_data=token_details["user"])
+
+        return JSONResponse(content={"access_token": new_access_token})
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token"
+    )
+
+
+@auth_router.get("/logout")
+async def revoke_token(token_details: dict = Depends(AccessTokenBearer())):
+    jti = token_details["jti"]
+
+    await add_jti_to_blocklist(jti)
+
+    return JSONResponse(
+        content={
+            "message": "Logged out successfully"
+        },
+        status_code=status.HTTP_200_OK
+    )
+"""
+----------------------------------------------------------------------------------------------------------------------------------
+|Pattern                 | Where                 | How                                                                           |
+----------------------------------------------------------------------------------------------------------------------------------
+|Module-level instance   | books/routes.py:12    | access_token_bearer = AccessTokenBearer() then Depends(access_token_bearer)   |
+|Inline instance         | auth/routes.py:82     | Depends(RefreshTokenBearer())                                                 |
+|Inline instance         | auth/routes.py:96     | Depends(AccessTokenBearer())                                                  |
+----------------------------------------------------------------------------------------------------------------------------------
+Both work identically. Depends() just needs a callable object — it doesn't care whether you created it once at module load or create it fresh inline. The inline version is shorter but creates a new instance each time the module is imported (not per-request — Python evaluates the default argument once at definition time).
+The two files are just inconsistent with each other. Books uses a named module-level variable, auth uses an inline anonymous instance. Same end result.
+"""
+

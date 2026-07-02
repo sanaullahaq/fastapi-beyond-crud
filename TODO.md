@@ -1,2 +1,9 @@
-- [] Rename the schemas with `schema` suffix
-- [] Rename the models with `model` suffix
+- [x] Rename the schemas with `schema` suffix
+- [x] Rename the models with `model` suffix
+- [x] Apply Inheritance in Pydantic Schemas
+- [x] Properly understand generating new token via refresh token. path `/refresh_token`
+- [x] Properly understand `Revoking Tokens Using Redis`
+- [x] Why there is a `ex` field in `token_blocklist.set(name=jti, value="", ex=JTI_EXPIRY)`
+- [x] Properly understand path `/logout`
+- [] Test recent changes.
+- [x] ConfigDict(from_attributes=True)

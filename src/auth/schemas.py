@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
-class UserModel(BaseModel):
+class UserOut(BaseModel):
     uid: uuid.UUID
     username: str
     email: str
@@ -15,7 +15,7 @@ class UserModel(BaseModel):
     updated_at: datetime
 
 
-class UserCreateModel(BaseModel):
+class UserCreate(BaseModel):
     first_name: str = Field(max_length=25)
     last_name: str = Field(max_length=25)
     username: str = Field(max_length=8)
@@ -25,11 +25,16 @@ class UserCreateModel(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "first_name": "John",
-                "last_name": "Doe",
-                "username": "johndoe",
-                "email": "johndoe123@xyz.com",
-                "password": "testpass123",
+                "first_name": "Sana",
+                "last_name": "U",
+                "username": "sanau",
+                "email": "sanau@xyz.com",
+                "password": "123456",
             }
         }
     }
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str

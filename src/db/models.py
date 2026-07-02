@@ -5,7 +5,7 @@ import uuid
 
 
 class User(SQLModel, table=True):
-    __tablename__ = "user_accounts"
+    __tablename__: str = "user_accounts"
 
     uid: uuid.UUID = Field(
         sa_column=Column(
