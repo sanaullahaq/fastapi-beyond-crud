@@ -77,6 +77,32 @@ class User(SQLModel, table=True):
         return f"<User {self.username}>"
 
 
+class BookTag(SQLModel, table=True):
+    book_uid: uuid.UUID = Field(default=None, foreign_key="books.uid", primary_key=True)
+    tag_uid: uuid.UUID = Field(default=None, foreign_key="tags.uid", primary_key=True)
+
+
+class Tag(SQLModel, table=True):
+    __tablename__: str = "tags"
+
+    uid: uuid.UUID = Field(
+        sa_column=Column(pg.UUID, primary_key=True, nullable=False, default=uuid.uuid4)
+    )
+    name: str = Field(sa_column=Column(pg.VARCHAR, nullable=False))
+    created_at: datetime = Field(sa_column=Column(pg.TIMESTAMP, default=datetime.now))
+    books: List["Book"] = Relationship(
+        link_model=BookTag,
+        back_populates="tags",
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
+    """
+    It specifies `link_model=BookTag`, indicating that the association between Tag and Book instances is managed through the BookTag class.
+    """
+
+    def __repr__(self):
+        return f"Tag <{self.name}>"
+
+
 class Book(SQLModel, table=True):
     """All SQLModel models are pydantic tables and therefore can be used for data validation."""
 
@@ -110,6 +136,12 @@ class Book(SQLModel, table=True):
     created_at: datetime = Field(sa_column=Column(pg.TIMESTAMP, default=datetime.now))
     updated_at: datetime = Field(sa_column=Column(pg.TIMESTAMP, default=datetime.now))
 
+    tags: List[Tag] = Relationship(
+        link_model=BookTag,
+        back_populates="books",
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
+
     def __repr__(self) -> str:
         return f"<Book {self.title}>"
 
@@ -126,9 +158,13 @@ class Review(SQLModel, table=True):
     book_uid: Optional[uuid.UUID] = Field(default=None, foreign_key="books.uid")
     created_at: datetime = Field(sa_column=Column(pg.TIMESTAMP, default=datetime.now))
     updated_at: datetime = Field(sa_column=Column(pg.TIMESTAMP, default=datetime.now))
-    user: Optional[User] = Relationship(back_populates="reviews", sa_relationship_kwargs={"lazy": "selectin"})
+    user: Optional[User] = Relationship(
+        back_populates="reviews", sa_relationship_kwargs={"lazy": "selectin"}
+    )
     # "reviews" = User's attribute name
-    book: Optional[Book] = Relationship(back_populates="reviews", sa_relationship_kwargs={"lazy": "selectin"})
+    book: Optional[Book] = Relationship(
+        back_populates="reviews", sa_relationship_kwargs={"lazy": "selectin"}
+    )
     # "reviews" = Book's attribute name
 
     def __repr__(self) -> str:
