@@ -36,3 +36,7 @@ class BookOut(BookBase):
     published_date: date
     created_at: datetime
     updated_at: datetime
+
+
+class BookDetailOut(BookOut):
+    reviews: List[Review]
