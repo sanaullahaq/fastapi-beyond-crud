@@ -1,7 +1,10 @@
 from datetime import date, datetime
+from typing import List
 import uuid
 
 from pydantic import BaseModel
+
+from src.db.models import Review
 
 
 class BookBase(BaseModel):

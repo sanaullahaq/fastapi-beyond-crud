@@ -2,18 +2,25 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
-from src.auth.dependencies import AccessTokenBearer, RefreshTokenBearer
-from src.auth.schemas import UserLogin, UserOut, UserCreate
+from src.auth.dependencies import (
+    AccessTokenBearer,
+    RefreshTokenBearer,
+    RoleChecker,
+    get_current_user,
+)
+from src.auth.schemas import UserBooksOut, UserLogin, UserOut, UserCreate
 from sqlmodel.ext.asyncio.session import AsyncSession
 from src.auth.service import UserService
 from src.auth.utils import create_access_token, verify_password
 from src.config import Config
 from src.db.main import get_session
+from src.db.models import User
 from src.db.redish import add_jti_to_blocklist
 
 
 auth_router = APIRouter()
 user_service = UserService()
+role_checker = RoleChecker(["admin", "user"])
 
 
 @auth_router.post(
@@ -21,7 +28,7 @@ user_service = UserService()
 )
 async def create_user_account(
     user_data: UserCreate, session: AsyncSession = Depends(get_session)
-) -> dict:
+) -> User:
     email = user_data.email
 
     user_exists = await user_service.user_exists(email=email, session=session)
@@ -99,11 +106,10 @@ async def revoke_token(token_details: dict = Depends(AccessTokenBearer())):
     await add_jti_to_blocklist(jti)
 
     return JSONResponse(
-        content={
-            "message": "Logged out successfully"
-        },
-        status_code=status.HTTP_200_OK
+        content={"message": "Logged out successfully"}, status_code=status.HTTP_200_OK
     )
+
+
 """
 ----------------------------------------------------------------------------------------------------------------------------------
 |Pattern                 | Where                 | How                                                                           |
@@ -116,3 +122,10 @@ Both work identically. Depends() just needs a callable object — it doesn't car
 The two files are just inconsistent with each other. Books uses a named module-level variable, auth uses an inline anonymous instance. Same end result.
 """
 
+
+@auth_router.get("/me", response_model=UserBooksOut)
+# @auth_router.get("/me", response_model=UserOut)
+async def get_current_user(
+    user=Depends(get_current_user), _: bool = Depends(role_checker)
+):
+    return user

@@ -1,7 +1,9 @@
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
 from src.books.routes import book_router
 from src.auth.routes import auth_router
-from contextlib import asynccontextmanager
+from src.reviews.routes import review_router
 
 from src.db.main import initdb
 
@@ -34,9 +36,10 @@ app = FastAPI(
     title="Bookly",
     description=description,
     version= version,
-    lifespan=lifespan
+    # lifespan=lifespan     # Commented this, because we shall be using Alembic to make changes to our database,
 )
 
 
 app.include_router(book_router, prefix=f"{version_prefix}/books", tags=["books"])
 app.include_router(auth_router, prefix=f"{version_prefix}/auth", tags=["auth"])
+app.include_router(review_router, prefix=f"{version_prefix}/review", tags=["review"])

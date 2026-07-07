@@ -5,5 +5,8 @@
 - [x] Properly understand `Revoking Tokens Using Redis`
 - [x] Why there is a `ex` field in `token_blocklist.set(name=jti, value="", ex=JTI_EXPIRY)`
 - [x] Properly understand path `/logout`
-- [] Test recent changes.
+- [x] Test recent changes.
 - [x] ConfigDict(from_attributes=True)
+
+- [] R&D about setup two databases
+- [x] Check `back_populates` and `sa_relationship_kwargs` params of `Relationship` class

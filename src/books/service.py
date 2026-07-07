@@ -1,3 +1,5 @@
+import uuid
+
 from sqlmodel.ext.asyncio.session import AsyncSession
 from src.books.schemas import BookCreate, BookUpdate
 from sqlmodel import select, desc
@@ -17,15 +19,26 @@ class BookService:
         Returns:
             list: list of books
         """
-        
+
         statement = select(Book).order_by(desc(Book.created_at))
-        
+
         result = await session.exec(statement)
 
         return result.all()
 
+    async def get_users_books(self, user_uid: str, session: AsyncSession):
+        statement = (
+            select(Book)
+            .where(Book.user_uid == user_uid)
+            .order_by(desc(Book.created_at))
+        )
+        result = await session.exec(statement)
 
-    async def create_book(self, book_data: BookCreate, session: AsyncSession):
+        return result.all()
+
+    async def create_book(
+        self, book_data: BookCreate, user_uid: uuid.UUID, session: AsyncSession
+    ):
         """
         Create a new book
 
@@ -37,19 +50,19 @@ class BookService:
         """
 
         book_data_dict = book_data.model_dump()
-        
-        new_book = Book(
-            **book_data_dict
-            )
-        
-        new_book.published_date = datetime.strptime(book_data_dict['published_date'], "%Y-%m-%d")
-        
-        session.add(new_book)
-        
-        await session.commit()
-        
-        return new_book
 
+        new_book = Book(**book_data_dict)
+
+        new_book.published_date = datetime.strptime(
+            book_data_dict["published_date"], "%Y-%m-%d"
+        )
+        new_book.user_uid = user_uid
+
+        session.add(new_book)
+
+        await session.commit()
+
+        return new_book
 
     async def get_book(self, book_uid: str, session: AsyncSession):
         """
@@ -62,16 +75,22 @@ class BookService:
             Book: the book object
         """
 
-        statement = select(Book).where(Book.uid==book_uid)
-        
+        try:
+            book_uid_obj = uuid.UUID(str(book_uid))
+        except ValueError:
+            return None
+
+        statement = select(Book).where(Book.uid == book_uid_obj)
+
         result = await session.exec(statement)
 
         book = result.first()
 
         return book if book is not None else None
 
-
-    async def update_book(self, book_uid: str, update_data: BookUpdate, session: AsyncSession):
+    async def update_book(
+        self, book_uid: str, update_data: BookUpdate, session: AsyncSession
+    ):
         """
         Update a book
 
@@ -88,7 +107,7 @@ class BookService:
         if book_to_update is not None:
             update_data_dict = update_data.model_dump()
 
-            for k,v in update_data_dict.items():
+            for k, v in update_data_dict.items():
                 setattr(book_to_update, k, v)
 
             await session.commit()
@@ -97,10 +116,9 @@ class BookService:
         else:
             return None
 
-
     async def delete_book(self, book_uid: str, session: AsyncSession):
         """Delete a book
-        
+
         Args:
             book_uid (str): the UUID of the book
         """
@@ -108,9 +126,9 @@ class BookService:
 
         if book_to_delete is not None:
             await session.delete(book_to_delete)
-            
+
             await session.commit()
-            
+
             return {}
         else:
             return None
