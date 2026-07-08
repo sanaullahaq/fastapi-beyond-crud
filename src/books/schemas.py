@@ -4,7 +4,7 @@ import uuid
 
 from pydantic import BaseModel
 
-from src.db.models import Review
+from src.db.models import Review, Tag
 
 
 class BookBase(BaseModel):
@@ -40,3 +40,4 @@ class BookOut(BookBase):
 
 class BookDetailOut(BookOut):
     reviews: List[Review]
+    tags: List[Tag]

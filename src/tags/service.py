@@ -3,7 +3,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import desc, select
 from src.books.service import BookService
 from src.db.models import Tag
-from src.tags.schemas import TagAdd
+from src.tags.schemas import TagAdd, TagCreate
 
 
 book_service = BookService()
@@ -47,8 +47,9 @@ class TagService:
             # 2a. Look up an existing Tag by name.
             #     one_or_none() returns the Tag or None if not found.
             # ------------------------------------------------------------
-            result = await session.exec(select(Tag).where(Tag.name == tag_item.name))
-            tag = result.one_or_none()
+            # result = await session.exec(select(Tag).where(Tag.name == tag_item.name))
+            # tag = result.one_or_none()
+            tag = await self.get_tag_by_name(tag_name=tag_item.name, session=session)
 
             # ------------------------------------------------------------
             # 2b. Create a new Tag if it doesn't already exist.
@@ -127,3 +128,60 @@ class TagService:
         #    during serialization.
         # ------------------------------------------------------------
         return book
+
+    async def get_tag_by_name(self, tag_name: str, session: AsyncSession):
+        result = await session.exec(select(Tag).where(Tag.name == tag_name))
+        tag = result.one_or_none()
+        return tag
+
+    async def get_tag_by_uid(self, tag_uid: str, session: AsyncSession):
+        statement = select(Tag).where(Tag.uid == tag_uid)
+        result = await session.exec(statement)
+        return result.first()
+
+    async def add_tag(self, tag_data: TagCreate, session: AsyncSession):
+        tag = await self.get_tag_by_name(tag_name=tag_data.name, session=session)
+        if tag is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Tag exists"
+            )
+
+        new_tag = Tag(name=tag_data.name)
+
+        session.add(new_tag)
+
+        await session.commit()
+
+        return new_tag
+
+    async def update_tag(
+        self, tag_uid: str, tag_update_data: TagCreate, session: AsyncSession
+    ):
+        tag = await self.get_tag_by_uid(tag_uid=tag_uid, session=session)
+
+        if tag is not None:
+            tag_update_data_dict = tag_update_data.model_dump()
+            for k, v in tag_update_data_dict.items():
+                setattr(tag, k, v)
+
+            await session.commit()
+
+            await session.refresh(tag)
+
+            return tag
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found"
+            )
+
+    async def delete_tag(self, tag_uid: str, session: AsyncSession):
+        tag = await self.get_tag_by_uid(tag_uid, session)
+
+        if not tag:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Tag does not exist"
+            )
+
+        await session.delete(tag)
+
+        await session.commit()
