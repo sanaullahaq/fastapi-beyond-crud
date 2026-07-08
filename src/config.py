@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRY_DAYS: int
     REDIS_URL:str
     JTI_EXPIRY_SECONDS: int
+    DB_ECHO: bool
     """
         This should match (or slightly exceed) your JWT's access-token expiry time.
         Once the original token would have expired anyway, there's no point keeping it in the blocklist — it's already invalid on its own.

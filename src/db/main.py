@@ -9,7 +9,7 @@ from src.config import Config
 
 async_engine = create_async_engine(
     url=Config.DATABASE_URL,
-    echo=True,
+    echo=Config.DB_ECHO,        #echo=True/False SQL logs anywhere
     # connect_args={"ssl": "require"}
 )
 
