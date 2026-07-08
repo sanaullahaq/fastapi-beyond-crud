@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.auth.dependencies import RoleChecker, get_current_user
 from src.db.main import get_session
 from src.db.models import User
+from src.errors import InsufficientPermission, ReviewNotFound
 from src.reviews.schemas import ReviewCreate
 from src.reviews.service import ReviewService
 
@@ -28,9 +29,7 @@ async def get_review(review_uid: str, session: AsyncSession = Depends(get_sessio
     if review:
         return review
     else:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Review not found"
-        )
+        raise ReviewNotFound()
 
 
 @review_router.post("/book/{book_uid}", dependencies=[user_role_checker])
@@ -65,7 +64,4 @@ async def delete_review(
     if review_to_delete == {}:
         return {}
     else:
-        raise HTTPException(
-            detail="Cannot delete this review",
-            status_code=status.HTTP_403_FORBIDDEN,
-        )
+        raise InsufficientPermission()

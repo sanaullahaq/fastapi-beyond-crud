@@ -71,6 +71,12 @@ class TagNotFound(BooklyException):
     pass
 
 
+class ReviewNotFound(BooklyException):
+    """Review Not found"""
+
+    pass
+
+
 class TagAlreadyExists(BooklyException):
     """Tag already exists"""
 
@@ -221,6 +227,17 @@ def register_all_errors(app: FastAPI):
             },
         ),
     )
+    app.add_exception_handler(
+        ReviewNotFound,
+        create_exception_handler(
+            status_code=status.HTTP_404_NOT_FOUND,
+            initial_detail={
+                "message": "Review Not Found",
+                "error_code": "review_not_found",
+            },
+        ),
+    )
+
     app.add_exception_handler(
         TagNotFound,
         create_exception_handler(

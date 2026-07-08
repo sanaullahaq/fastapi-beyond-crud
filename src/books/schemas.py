@@ -34,6 +34,7 @@ class BookUpdate(BookBase):
 class BookOut(BookBase):
     uid: uuid.UUID
     published_date: date
+    tags: List[Tag]
     created_at: datetime
     updated_at: datetime
 

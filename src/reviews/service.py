@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from src.auth.service import UserService
 from src.books.service import BookService
 from src.db.models import Review
+from src.errors import BookNotFound, UserNotFound
 from src.reviews.schemas import ReviewCreate
 
 
@@ -27,18 +28,14 @@ class ReviewService:
                 email=user_email, session=session
             )
             if not user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-                )
+                raise UserNotFound()
 
             review_data_dict = review_data.model_dump()
             new_review = Review(**review_data_dict)
 
             book = await books_service.get_book(book_uid=book_uid, session=session)
             if not book:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="Book not found"
-                )
+                raise BookNotFound()
 
             new_review.user = user
             """
@@ -55,6 +52,7 @@ class ReviewService:
 
         except Exception as e:
             logging.exception(e)
+            # No matching custom exception for generic 500 in errors.py
             raise HTTPException(
                 detail="Oops...something went wrong!",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
