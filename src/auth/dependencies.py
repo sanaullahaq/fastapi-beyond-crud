@@ -16,6 +16,7 @@ from src.errors import (
     AccessTokenRequired,
     InsufficientPermission,
     InvalidToken,
+    NotAuthenticated,
     RefreshTokenRequired,
 )
 
@@ -23,7 +24,7 @@ user_service = UserService()
 
 
 class TokenBearer(HTTPBearer):
-    def __init__(self, auto_error=True):
+    def __init__(self, auto_error=False):
         super().__init__(auto_error=auto_error)
 
     """
@@ -35,30 +36,14 @@ class TokenBearer(HTTPBearer):
         creds = await super().__call__(request)
 
         if creds is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Not authenticated"
-            )
+            raise NotAuthenticated()
 
         token_data = decode_token(creds.credentials)
 
         if not token_data:
-            # raise HTTPException(
-            #     status_code=status.HTTP_403_FORBIDDEN,
-            #     detail={
-            #         "error": "This token is invalid or expired",
-            #         "resolution": "Please get new token",
-            #     },
-            # )
             raise InvalidToken()
 
         if await token_in_blocklist(token_data["jti"]):
-            # raise HTTPException(
-            #     status_code=status.HTTP_403_FORBIDDEN,
-            #     detail={
-            #         "error": "This token is invalid or has been revoked",
-            #         "resolution": "Please get new token",
-            #     },
-            # )
             raise InvalidToken()
 
         self.verify_token_data(token_data)
@@ -72,20 +57,12 @@ class TokenBearer(HTTPBearer):
 class AccessTokenBearer(TokenBearer):
     def verify_token_data(self, token_data: dict) -> None:
         if token_data and token_data["refresh"]:
-            # raise HTTPException(
-            #     status_code=status.HTTP_403_FORBIDDEN,
-            #     detail="Please provide an access token",
-            # )
             raise AccessTokenRequired()
 
 
 class RefreshTokenBearer(TokenBearer):
     def verify_token_data(self, token_data: dict) -> None:
         if token_data and not token_data["refresh"]:
-            # raise HTTPException(
-            #     status_code=status.HTTP_403_FORBIDDEN,
-            #     detail="Please provide a refresh token",
-            # )
             raise RefreshTokenRequired()
 
 
@@ -108,8 +85,4 @@ class RoleChecker:
         if current_user.role in self.allowed_roles:
             return True
         else:
-            # raise HTTPException(
-            #     status_code=status.HTTP_403_FORBIDDEN,
-            #     detail="You are not permitted to perform this action",
-            # )
             raise InsufficientPermission()

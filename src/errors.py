@@ -11,6 +11,12 @@ class BooklyException(Exception):
     pass
 
 
+class NotAuthenticated(BooklyException):
+    """User has not provided any credentials"""
+
+    pass
+
+
 class InvalidToken(BooklyException):
     """User has provided an invalid or expired token"""
 
@@ -48,7 +54,7 @@ class InvalidCredentials(BooklyException):
 
 
 class InsufficientPermission(BooklyException):
-    """User does not have the neccessary permissions to perform an action."""
+    """User does not have the necessary permissions to perform an action."""
 
     pass
 
@@ -109,6 +115,17 @@ def create_exception_handler(
 
 
 def register_all_errors(app: FastAPI):
+    app.add_exception_handler(
+        NotAuthenticated,
+        create_exception_handler(
+            status_code=status.HTTP_403_FORBIDDEN,
+            initial_detail={
+                "message": "User is not authenticated",
+                "resolution": "Please provide authentication credentials properly",
+                "error_code": "not_authenticated",
+            },
+        ),
+    )
     app.add_exception_handler(
         UserAlreadyExists,
         create_exception_handler(
