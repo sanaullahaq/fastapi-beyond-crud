@@ -22,7 +22,15 @@ from src.errors import (
 
 user_service = UserService()
 
+"""
+When no Authorization header exists, HTTPBearer (with auto_error=True) raises a plain HTTPException(403, "Not authenticated")
+before your code `if creds is None: raise NotAuthenticated()` ever executes.
 
+That default HTTPException doesn't match any registered handler in errors.py, so FastAPI returns the default {"detail": "Not authenticated"}
+
+Pass auto_error=False to HTTPBearer so it returns None instead of raising — then your code `if creds is None: raise NotAuthenticated()` catches it and raises NotAuthenticated().
+
+"""
 class TokenBearer(HTTPBearer):
     def __init__(self, auto_error=False):
         super().__init__(auto_error=auto_error)
