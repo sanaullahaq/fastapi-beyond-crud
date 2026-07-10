@@ -25,9 +25,7 @@ class UserService:
 
         return True if user is not None else False
 
-    async def create_user(
-        self, user_data: UserCreate, session: AsyncSession
-    ) -> User:
+    async def create_user(self, user_data: UserCreate, session: AsyncSession) -> User:
         user_data_dict = user_data.model_dump()
 
         new_user = User(**user_data_dict)
@@ -38,3 +36,11 @@ class UserService:
         await session.commit()
 
         return new_user
+
+    async def update_user(self, user: User, user_data: dict, session: AsyncSession):
+        for k, v in user_data.items():
+            setattr(user, k, v)
+
+        await session.commit()
+
+        return user

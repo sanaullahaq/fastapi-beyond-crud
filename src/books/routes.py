@@ -49,7 +49,9 @@ async def create_a_book(
     return new_book
 
 
-@book_router.get("/{book_uid}", response_model=BookDetailOut, dependencies=[role_checker])
+@book_router.get(
+    "/{book_uid}", response_model=BookDetailOut, dependencies=[role_checker]
+)
 async def get_book(
     book_uid: str,
     session: AsyncSession = Depends(get_session),

@@ -3,10 +3,11 @@ import logging
 import uuid
 
 import bcrypt
+from fastapi import HTTPException, status
 import jwt
 
 from src.config import Config
-
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 """
     Did not follow the same approach as in the tutorial as passlib library is not under active maintenance
@@ -30,7 +31,9 @@ def verify_password(password: str, stored_hashed: str) -> bool:
 
 
 def create_access_token(
-    user_data: dict, expiry: timedelta = None, refresh: bool = False # pyright: ignore[reportArgumentType]
+    user_data: dict,
+    expiry: timedelta = None,
+    refresh: bool = False,  # pyright: ignore[reportArgumentType]
 ) -> str:
     payload = {
         "user": user_data,
@@ -70,3 +73,31 @@ def decode_token(token: str) -> dict | None:
     Note - Using PyJWTError is a very effective way of catching all exceptions that arise from PyJWT,
     since it is the base class from which they are built.
 """
+
+
+serializer = URLSafeTimedSerializer(
+    secret_key=Config.JWT_SECRET, salt="email-configuration"
+)
+
+
+def create_url_safe_token(data: dict):
+    """Serialize a dict into a URLSafe Token"""
+    token = serializer.dumps(data)
+
+    return token
+
+
+def decode_url_safe_token(token: str, max_age=300) -> dict | None:
+    """Deserialize a URLSafe token to get data"""
+
+    try:
+        data = serializer.loads(token, max_age=max_age)
+        return data
+    except SignatureExpired:
+        raise HTTPException(
+            detail="Token has expired", status_code=status.HTTP_400_BAD_REQUEST
+        )
+        # If the token is expired, it raises a SignatureExpired exception
+    except BadSignature:
+        raise HTTPException(detail="Invalid Token", status_code=status.HTTP_400_BAD_REQUEST)
+        # If the token is invalid for any other reason, it raises a BadSignature exception

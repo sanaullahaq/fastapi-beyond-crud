@@ -89,7 +89,7 @@ class UserNotFound(BooklyException):
     pass
 
 
-class AccountNotVerified(Exception):
+class AccountNotVerified(BooklyException):
     """Account not yet verified"""
 
     pass
