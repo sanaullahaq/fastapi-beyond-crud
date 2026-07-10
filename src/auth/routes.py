@@ -1,7 +1,9 @@
+from fastapi import BackgroundTasks
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
+from src.celery_tasks import send_email
 from src.mail import mail
 from src.auth.dependencies import (
     AccessTokenBearer,
@@ -14,6 +16,7 @@ from src.auth.schemas import (
     PasswordResetConfirm,
     PasswordResetRequest,
     UserBooksOut,
+    UserCreateResponse,
     UserLogin,
     UserOut,
     UserCreate,
@@ -40,10 +43,14 @@ user_service = UserService()
 role_checker = RoleChecker(["admin", "user"])
 
 
-@auth_router.post("/signup", status_code=status.HTTP_201_CREATED)
+@auth_router.post(
+    "/signup", status_code=status.HTTP_201_CREATED, response_model=UserCreateResponse
+)
 async def create_user_account(
-    user_data: UserCreate, session: AsyncSession = Depends(get_session)
-) -> dict:
+    user_data: UserCreate,
+    bg_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+) -> UserCreateResponse:
     email = user_data.email
 
     user_exists = await user_service.user_exists(email=email, session=session)
@@ -57,20 +64,24 @@ async def create_user_account(
 
     link = f"http://{Config.DOMAIN}/api/v1/auth/verify/{token}"
 
-    html_message = f"""
+    emails = [email]
+    subject="Verify your email"
+    html = f"""
                     <h1>Verify your Email</h1>
                     <p>Please click this <a href="{link}">link</a> to verify your email</p>
                 """
-    message = create_mail_message(
-        recipients=[email], subject="Verify your email", body=html_message
+    # message = create_mail_message(
+    #     recipients=emails, subject=subject, body=html
+    # )
+
+    # await mail.send_message(message=message)
+    # bg_tasks.add_task(mail.send_message, message)       # Now mail will be sent in the background
+    send_email.delay(emails, subject, html)     # celery in action
+
+    return UserCreateResponse(
+        message="Account Created!, Check email to verify your account",
+        user=new_user,
     )
-
-    await mail.send_message(message=message)
-
-    return {
-        "message": "Account Created!, Check email to verify your account",
-        "user": new_user,
-    }
 
 
 @auth_router.get("/verify/{token}")
@@ -185,8 +196,9 @@ async def send_mail(emails: EmailAddresses):
     subject = "Welcome to our app"
     html = "<h1>Welcome to the app</h1>"
 
-    message = create_mail_message(recipients=emails, subject=subject, body=html)
-    await mail.send_message(message)
+    # message = create_mail_message(recipients=emails, subject=subject, body=html)
+    # await mail.send_message(message)
+    send_email.delay(emails, subject, html)     # celery in action
 
     return {"message": "Email sent successfully"}
 
@@ -208,15 +220,19 @@ async def password_reset_request(
 
         link = f"http://{Config.DOMAIN}/api/v1/auth/password-reset-confirm/{token}"
 
-        html_message = f"""
+        emails = [email]
+        subject="Reset Your Password"
+        html = f"""
                         <h1>Reset Your Password</h1>
                         <p>Please click this <a href="{link}">link</a> to reset your password</p>
                     """
-        message = create_mail_message(
-            recipients=[email], subject="Reset Your Password", body=html_message
-        )
+        # message = create_mail_message(
+        #     recipients=[email], subject=subject, body=html
+        # )
 
-        await mail.send_message(message=message)
+        # await mail.send_message(message=message)
+
+        send_email.delay(emails, subject, html)     # celery in action
 
         return JSONResponse(
             content={
@@ -227,7 +243,7 @@ async def password_reset_request(
 
 
 @auth_router.post("/password-reset-confirm/{token}")
-async def password_reset_confirm(
+async def reset_account_password(
     token: str,
     passwords: PasswordResetConfirm,
     session: AsyncSession = Depends(get_session),

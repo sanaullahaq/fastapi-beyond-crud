@@ -35,3 +35,9 @@ class Settings(BaseSettings):
     )
 
 Config = Settings()
+
+
+# Celery Configuration
+broker_url = Config.REDIS_URL
+result_backend = Config.REDIS_URL
+broker_connection_retry_on_startup = True # Celery will retry connecting to the broker if it's initially unavailable.
