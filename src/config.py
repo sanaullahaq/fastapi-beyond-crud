@@ -41,3 +41,5 @@ Config = Settings()
 broker_url = Config.REDIS_URL
 result_backend = Config.REDIS_URL
 broker_connection_retry_on_startup = True # Celery will retry connecting to the broker if it's initially unavailable.
+task_track_started = True
+task_send_sent_event = True
