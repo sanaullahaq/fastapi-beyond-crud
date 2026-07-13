@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import List
+from typing import List, Optional
 import uuid
 
 from pydantic import BaseModel
@@ -23,12 +23,17 @@ class BookCreate(BookBase):
     published_date: str
 
 
-class BookUpdate(BookBase):
+class BookUpdate(BaseModel):
     """
     This class is used to validate the request when updating a book
     """
 
-    pass
+    title: Optional[str] = None
+    author: Optional[str] = None
+    publisher: Optional[str] = None
+    page_count: Optional[int] = None
+    language: Optional[str] = None
+    published_date: Optional[str] = None
 
 
 class BookOut(BookBase):

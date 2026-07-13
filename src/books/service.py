@@ -105,7 +105,7 @@ class BookService:
         book_to_update = await self.get_book(book_uid=book_uid, session=session)
 
         if book_to_update is not None:
-            update_data_dict = update_data.model_dump()
+            update_data_dict = update_data.model_dump(exclude_none=True)        # as there are optional fields with None as default
 
             for k, v in update_data_dict.items():
                 setattr(book_to_update, k, v)
