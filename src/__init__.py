@@ -9,16 +9,16 @@ from src.tags.routes import tags_router
 
 from src.db.main import initdb
 from src.errors import register_all_errors
+from fastapi.openapi.docs import get_redoc_html
 
 
-#the lifespan event
+# the lifespan event
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Server is starting...")
     await initdb()
     yield
     print("Server is stopping...")
-
 
 
 version = "v1"
@@ -32,18 +32,45 @@ This REST API is able to;
 - Add tags to Books e.t.c.
     """
 
-version_prefix =f"/api/{version}"
+version_prefix = f"/api/{version}"
 
 
 app = FastAPI(
     title="Bookly",
     description=description,
-    version= version,
+    version=version,
     # lifespan=lifespan     # Commented this, because we shall be using Alembic to make changes to our database,
+    license_info={"name": "MIT License", "url": "https://opensource.org/license/mit"},
+    contact={
+        "name": "Sanaulla Haq",
+        "url": "https://github.com/sanaullahaq",
+        "email": "sanaullahaq01@gmail.com",
+    },
+    terms_of_service="https://example.com/tos",
+    openapi_url=f"{version_prefix}/openapi.json",
+    docs_url=f"{version_prefix}/docs",  # 127.0.0.1:8000/api/v1/docs
+    # redoc_url=f"{version_prefix}/redoc",
+    redoc_url=None,
 )
+"""
+    If you want to disable the openapi_url, docs_url, or redoc_url, simply set their values to None.
+"""
+
+"""
+There is an issue with default /redoc_url, so we set it to `None` and followed the below approach
+"""
+
+@app.get(f"{version_prefix}/redoc", include_in_schema=False)
+async def redoc_html():
+    return get_redoc_html(
+        openapi_url=app.openapi_url,
+        title=app.title + " - ReDoc",
+        redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@2.2.0/bundles/redoc.standalone.js",
+    )
+
 
 register_all_errors(app)
-register_custom_logging_middleware(app)        #Custom Logging through middleware
+register_custom_logging_middleware(app)  # Custom Logging through middleware
 register_cors_middleware(app)
 
 
