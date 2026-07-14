@@ -52,7 +52,7 @@ def register_cors_middleware(app: FastAPI):
     # Enforce security boundaries
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=["example.com", "*.example.com", "localhost", "127.0.0.1"],
+        allowed_hosts=["example.com", "*.example.com", "localhost", "127.0.0.1", "bookly-nx51.onrender.com"],
     )
 
     """
