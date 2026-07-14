@@ -10,5 +10,7 @@
 
 - [] R&D about setup two databases
 - [x] Check `back_populates` and `sa_relationship_kwargs` params of `Relationship` class
-- [] Put vs Patch request
+- [x] Put vs Patch request
 - [] Review the codebase via opencode and R&D
+- [] FastAPI Cloud
+- [] Update FastAPI version

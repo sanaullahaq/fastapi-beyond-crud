@@ -124,7 +124,7 @@ def register_all_errors(app: FastAPI):
     app.add_exception_handler(
         NotAuthenticated,
         create_exception_handler(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             initial_detail={
                 "message": "User is not authenticated",
                 "resolution": "Please provide authentication credentials properly",
