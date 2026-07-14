@@ -1,4 +1,5 @@
 env
+env_lock
 __pycache__
 .mypy_cache
 .pytest_cache
