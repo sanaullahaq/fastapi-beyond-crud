@@ -5,6 +5,7 @@ import uuid
 from pydantic import BaseModel
 
 from src.db.models import Review, Tag
+from src.tags.schemas import TagOut
 
 
 class BookBase(BaseModel):
@@ -39,11 +40,11 @@ class BookUpdate(BaseModel):
 class BookOut(BookBase):
     uid: uuid.UUID
     published_date: date
-    tags: List[Tag]
+    tags: List[TagOut]
     created_at: datetime
     updated_at: datetime
 
 
 class BookDetailOut(BookOut):
     reviews: List[Review]
-    tags: List[Tag]
+    tags: List[TagOut]
