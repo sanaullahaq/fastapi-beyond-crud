@@ -4,6 +4,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+
+from src.config import Config
+
 logger = logging.getLogger("uvicorn.access")
 logger.disabled = True
 
@@ -52,7 +58,13 @@ def register_cors_middleware(app: FastAPI):
     # Enforce security boundaries
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=["example.com", "*.example.com", "localhost", "127.0.0.1", "bookly-nx51.onrender.com"],
+        allowed_hosts=[
+            "example.com",
+            "*.example.com",
+            "localhost",
+            "127.0.0.1",
+            "bookly-nx51.onrender.com",
+        ],
     )
 
     """
@@ -62,3 +74,15 @@ def register_cors_middleware(app: FastAPI):
     
     Both are usually needed together — one doesn't substitute for the other.
     """
+
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=Config.REDIS_URL,
+    default_limits=["5/minute"],  # global default
+)
+
+
+def register_rate_limiter(app: FastAPI):
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

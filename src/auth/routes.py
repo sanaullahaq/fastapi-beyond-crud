@@ -1,10 +1,10 @@
-from fastapi import BackgroundTasks
+from src.middleware import limiter
+from fastapi import BackgroundTasks, Request
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
 from src.celery_tasks import send_email
-from src.mail import mail
 from src.auth.dependencies import (
     AccessTokenBearer,
     RefreshTokenBearer,
@@ -18,7 +18,6 @@ from src.auth.schemas import (
     UserBooksOut,
     UserCreateResponse,
     UserLogin,
-    UserOut,
     UserCreate,
 )
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -32,10 +31,8 @@ from src.auth.utils import (
 )
 from src.config import Config
 from src.db.main import get_session
-from src.db.models import User
 from src.db.redish import add_jti_to_blocklist
 from src.errors import InvalidCredentials, InvalidToken, UserAlreadyExists, UserNotFound
-from src.mail import create_mail_message
 
 
 auth_router = APIRouter()
@@ -46,6 +43,7 @@ role_checker = RoleChecker(["admin", "user"])
 @auth_router.post(
     "/signup", status_code=status.HTTP_201_CREATED, response_model=UserCreateResponse
 )
+@limiter.limit("5/hour")  # 5 request per hour per IP, Prevent account creation spam
 async def create_user_account(
     user_data: UserCreate,
     bg_tasks: BackgroundTasks,
@@ -109,6 +107,7 @@ async def verify_user_account(token: str, session: AsyncSession = Depends(get_se
 
 
 @auth_router.post("/login")
+@limiter.limit("10/minute")  # 10 request per minute per IP, Brute-force protection
 async def login_users(
     login_data: UserLogin, session: AsyncSession = Depends(get_session)
 ) -> JSONResponse:
@@ -190,6 +189,7 @@ async def get_current_user(
 
 
 @auth_router.post("/send_mail")
+@limiter.limit("5/hour")  # 5 request per hour per IP, Email abuse prevention
 async def send_mail(emails: EmailAddresses):
     emails = emails.addresses
 
@@ -206,8 +206,11 @@ async def send_mail(emails: EmailAddresses):
 @auth_router.post(
     "/password-reset-request",
 )
+@limiter.limit("3/hour")  # 3 requests per hour per IP, Prevent email flooding
 async def password_reset_request(
-    email_data: PasswordResetRequest, session: AsyncSession = Depends(get_session)
+    email_data: PasswordResetRequest,
+    request: Request,  # The request: Request parameter is required by slowapi to extract the client IP — it doesn't affect existing logic.
+    session: AsyncSession = Depends(get_session),
 ) -> JSONResponse:
     email = email_data.email
 

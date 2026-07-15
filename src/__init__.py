@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from src.books.routes import book_router
 from src.auth.routes import auth_router
-from src.middleware import register_cors_middleware, register_custom_logging_middleware
+from src.middleware import register_cors_middleware, register_custom_logging_middleware, register_rate_limiter
 from src.reviews.routes import review_router
 from src.tags.routes import tags_router
 
@@ -72,6 +72,7 @@ async def redoc_html():
 register_all_errors(app)
 register_custom_logging_middleware(app)  # Custom Logging through middleware
 register_cors_middleware(app)
+register_rate_limiter(app)
 
 
 app.include_router(book_router, prefix=f"{version_prefix}/books", tags=["books"])

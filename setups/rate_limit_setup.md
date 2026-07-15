@@ -35,10 +35,10 @@ def register_rate_limiter(app: FastAPI):
 
 SlowAPI provides two built-in key functions:
 
-| Function | Source | Use when |
-|---|---|---|
-| `get_remote_address` | `request.client.host` | Direct client connections (no proxy) |
-| `get_ipaddr` | `X-Forwarded-For` header | Behind a reverse proxy (Nginx, Render, etc.) |
+| Function              | Source                    | Use when                                      |
+|-----------------------|---                        |---                                            |
+| `get_remote_address`  | `request.client.host`     | Direct client connections (no proxy)          |
+| `get_ipaddr`          | `X-Forwarded-For` header  | Behind a reverse proxy (Nginx, Render, etc.)  |
 
 You can also pass a **custom callable** — it just needs to accept `Request` and return a string:
 
