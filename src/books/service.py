@@ -62,6 +62,8 @@ class BookService:
 
         await session.commit()
 
+        await session.refresh(new_book)
+
         return new_book
 
     async def get_book(self, book_uid: str, session: AsyncSession):
@@ -111,6 +113,8 @@ class BookService:
                 setattr(book_to_update, k, v)
 
             await session.commit()
+
+            await session.refresh(book_to_update)
 
             return book_to_update
         else:

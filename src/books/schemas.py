@@ -20,7 +20,7 @@ class BookCreate(BookBase):
     This class is used to validate the request when creating a book
     """
 
-    published_date: str
+    published_date: str = "YYYY-MM-DD"
 
 
 class BookUpdate(BaseModel):

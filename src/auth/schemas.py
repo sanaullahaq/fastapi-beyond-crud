@@ -1,7 +1,7 @@
 from typing import Annotated, List
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from src.books.schemas import BookOut
 from src.reviews.schemas import ReviewOut
@@ -24,7 +24,7 @@ class UserOut(BaseModel):
 
     uid: uuid.UUID
     username: str
-    email: str
+    email: EmailStr
     first_name: str
     last_name: str
     is_verified: bool
@@ -42,16 +42,16 @@ class UserCreate(BaseModel):
     first_name: str = Field(max_length=25)
     last_name: str = Field(max_length=25)
     username: str = Field(max_length=8)
-    email: str = Field(max_length=40)
+    email: EmailStr = Field(max_length=40)
     password: PasswordStr
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "first_name": "Sana",
-                "last_name": "U",
+                "first_name": "Sanaulla",
+                "last_name": "Haq",
                 "username": "sanau",
-                "email": "sanau@xyz.com",
+                "email": "sanaullahaq1997@gmail.com",
                 "password": "123456",
             }
         }
@@ -59,13 +59,13 @@ class UserCreate(BaseModel):
 
 
 class UserLogin(BaseModel):
-    email: str
+    email: EmailStr
     password: str
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "email": "sanau@xyz.com",
+                "email": "sanaullahaq1997@gmail.com",
                 "password": "123456",
             }
         }
@@ -78,11 +78,11 @@ class UserBooksOut(UserOut):
 
 
 class EmailAddresses(BaseModel):
-    addresses: List[str]
+    addresses: List[EmailStr]
 
 
 class PasswordResetRequest(BaseModel):
-    email: str
+    email: EmailStr
 
 
 class PasswordResetConfirm(BaseModel):

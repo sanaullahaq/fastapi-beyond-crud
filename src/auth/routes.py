@@ -65,7 +65,7 @@ async def create_user_account(
     link = f"http://{Config.DOMAIN}/api/v1/auth/verify/{token}"
 
     emails = [email]
-    subject="Verify your email"
+    subject = "Verify your email"
     html = f"""
                     <h1>Verify your Email</h1>
                     <p>Please click this <a href="{link}">link</a> to verify your email</p>
@@ -76,7 +76,7 @@ async def create_user_account(
 
     # await mail.send_message(message=message)
     # bg_tasks.add_task(mail.send_message, message)       # Now mail will be sent in the background
-    send_email.delay(emails, subject, html)     # celery in action
+    send_email.delay(emails, subject, html)  # celery in action
 
     return UserCreateResponse(
         message="Account Created!, Check email to verify your account",
@@ -198,7 +198,7 @@ async def send_mail(emails: EmailAddresses):
 
     # message = create_mail_message(recipients=emails, subject=subject, body=html)
     # await mail.send_message(message)
-    send_email.delay(emails, subject, html)     # celery in action
+    send_email.delay(emails, subject, html)  # celery in action
 
     return {"message": "Email sent successfully"}
 
@@ -208,7 +208,7 @@ async def send_mail(emails: EmailAddresses):
 )
 async def password_reset_request(
     email_data: PasswordResetRequest, session: AsyncSession = Depends(get_session)
-):
+) -> JSONResponse:
     email = email_data.email
 
     user_exists = await user_service.user_exists(email=email, session=session)
@@ -221,7 +221,7 @@ async def password_reset_request(
         link = f"http://{Config.DOMAIN}/api/v1/auth/password-reset-confirm/{token}"
 
         emails = [email]
-        subject="Reset Your Password"
+        subject = "Reset Your Password"
         html = f"""
                         <h1>Reset Your Password</h1>
                         <p>Please click this <a href="{link}">link</a> to reset your password</p>
@@ -232,14 +232,14 @@ async def password_reset_request(
 
         # await mail.send_message(message=message)
 
-        send_email.delay(emails, subject, html)     # celery in action
+        send_email.delay(emails, subject, html)  # celery in action
 
-        return JSONResponse(
-            content={
-                "message": "Please check your email for instructions to reset your password",
-            },
-            status_code=status.HTTP_200_OK,
-        )
+    return JSONResponse(
+        content={
+            "message": "If an account with that email exists, a password reset link has been sent.",
+        },
+        status_code=status.HTTP_200_OK,
+    )
 
 
 @auth_router.post("/password-reset-confirm/{token}")
