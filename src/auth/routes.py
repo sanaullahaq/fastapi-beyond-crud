@@ -47,6 +47,7 @@ role_checker = RoleChecker(["admin", "user"])
 async def create_user_account(
     user_data: UserCreate,
     bg_tasks: BackgroundTasks,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> UserCreateResponse:
     email = user_data.email
@@ -109,7 +110,9 @@ async def verify_user_account(token: str, session: AsyncSession = Depends(get_se
 @auth_router.post("/login")
 @limiter.limit("10/minute")  # 10 request per minute per IP, Brute-force protection
 async def login_users(
-    login_data: UserLogin, session: AsyncSession = Depends(get_session)
+    login_data: UserLogin,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ) -> JSONResponse:
     email = login_data.email
     password = login_data.password
@@ -190,7 +193,7 @@ async def get_current_user(
 
 @auth_router.post("/send_mail")
 @limiter.limit("5/hour")  # 5 request per hour per IP, Email abuse prevention
-async def send_mail(emails: EmailAddresses):
+async def send_mail(emails: EmailAddresses, request: Request):
     emails = emails.addresses
 
     subject = "Welcome to our app"
