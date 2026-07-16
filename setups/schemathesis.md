@@ -10,6 +10,8 @@ pip install schemathesis
 
 ```bash
 uvicorn src.__init__:app
+Or
+fastapi dev src/
 ```
 
 ## 3. Basic scan (runs all endpoints at once)
