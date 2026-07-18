@@ -13,4 +13,4 @@
 - [x] Put vs Patch request
 - [] Review the codebase via opencode and R&D
 - [] FastAPI Cloud
-- [] Update FastAPI version
+- [x] Update FastAPI version
