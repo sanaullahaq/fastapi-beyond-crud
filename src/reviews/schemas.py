@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class ReviewBase(BaseModel):
-    rating: int = Field(le=5)
+    rating: int = Field(ge=1, le=5)
     review_text: str
 
 
