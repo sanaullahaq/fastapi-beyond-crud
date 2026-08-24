@@ -1,6 +1,6 @@
 # Frontend Implementation — Detailed Steps
 
-> Backend base URL: `http://localhost:8000/api/v1`  
+> Backend base URL: `http://localhost:8000/api/v1`
 > All request/response shapes below are derived from the actual Pydantic schemas and route handlers in the `src/` directory.
 
 ---
@@ -27,14 +27,15 @@ npm install axios @tanstack/react-query zustand react-router-dom
 npm install -D @types/react @types/react-dom
 ```
 
-### 1.3 Install Tailwind CSS (optional, pending decision)
+### 1.3 Install Tailwind CSS (DECIDED: CONFIRMED — installed)
 
 ```bash
 npm install -D tailwindcss @tailwindcss/vite
 ```
 
-- Add `@import "tailwindcss";` to `src/index.css`
-- Add the Tailwind plugin to `vite.config.ts`
+- Done: `@import "tailwindcss";` added to `src/index.css`
+- Done: `@tailwindcss/vite` plugin added to `vite.config.ts` (`plugins: [react(), tailwindcss()]`)
+- Required follow-up: strip all legacy Vite template styles from `src/index.css` — the scaffold still ships `#root { width: 1126px; text-align: center; border-inline: ... }`, hero CSS vars and dark-scheme overrides, which constrain width and fight Tailwind utilities. After cleanup, `index.css` contains only `@import "tailwindcss";` (executed as part of step 2.3).
 
 ### 1.4 Configure Vite environment variable
 
@@ -587,19 +588,203 @@ export function useCurrentUser() {
 }
 ```
 
-### 2.3 Build `<LoginPage />`
+### 2.3 Build `<LoginPage />` — DETAILED SPEC (approved, ready to implement)
 
-**File:** `src/features/auth/LoginPage.tsx`
+**Files touched:**
 
-- Render a form: email, password fields + submit button
-- On submit call `login({ email, password })` from `api.ts`
-- On success: `useAuthStore.getState().setTokens(accessToken, refreshToken)` → fetch `/auth/me` → `setUser(data)` → navigate to `/`
-- On error: parse with `parseApiError(error)` → display via `<ErrorMessage />`
-- Link to `/signup` and `/forgot-password`
+| File | Action |
+|---|---|
+| `src/index.css` | Modify — strip legacy Vite template styles (see 1.3) |
+| `src/components/ErrorMessage.tsx` | Create — shared error banner (pulled forward from 2.8) |
+| `src/features/auth/LoginPage.tsx` | Create |
+| `src/router.tsx` | Modify — register public `/login` route |
 
-**Backend validation notes:**
-- `POST /auth/login` returns 400 with `{ message: "Invalid Email Or Password", error_code: "invalid_email_or_password" }` on bad credentials (from `InvalidCredentials` in `errors.py:71`)
-- Rate limited: 10/minute per IP (SlowAPI)
+#### 2.3.0 Prerequisite cleanup — `src/index.css`
+
+Replace the entire file with:
+
+```css
+@import "tailwindcss";
+```
+
+Why: leftover template styles (`#root { width: 1126px; max-width: 100%; text-align: center; border-inline: ... }`, hero vars, dark-scheme overrides) constrain layout and conflict with Tailwind on every future page.
+
+#### 2.3.1 `<ErrorMessage />` (`src/components/ErrorMessage.tsx`)
+
+Pulled forward from 2.8 because LoginPage (and every later page) depends on it:
+
+```tsx
+import { parseApiError } from "../lib/error";
+
+export default function ErrorMessage({ error }: { error: unknown }) {
+  const { message, resolution } = parseApiError(error);
+
+  return (
+    <div role="alert" className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <p>{message}</p>
+      {resolution && <p className="mt-1 text-red-600">{resolution}</p>}
+    </div>
+  );
+}
+```
+
+Matches backend payloads `{ message, resolution?, error_code }`.
+
+#### 2.3.2 `<LoginPage />` (`src/features/auth/LoginPage.tsx`)
+
+Key decisions:
+- One `useMutation` wraps the whole success chain so `isPending` spans both network calls:
+  1. `login()` → tokens
+  2. `useAuthStore.getState().setTokens(...)` (persist middleware auto-writes localStorage key `bookly-auth`)
+  3. `getCurrentUser()` (`/auth/me`) → `setUser(data)`
+  4. `onSuccess:` → `navigate("/", { replace: true })`
+- Controlled inputs + HTML5 validation (`type="email"`, `required`) — no form library needed
+- UX polish: show/hide password toggle, submit disabled + relabeled while pending, `<ErrorMessage />` banner above form
+- Links to `/signup` and `/forgot-password` (routes arrive in later steps — dead links acceptable mid-phase)
+- Accessibility: `htmlFor`/`id` pairs, `aria-label` on toggle, `aria-busy` on submit
+
+```tsx
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useMutation } from "@tanstack/react-query";
+import { login, getCurrentUser } from "./api";
+import { useAuthStore } from "./authStore";
+import ErrorMessage from "../../components/ErrorMessage";
+
+export default function LoginPage() {
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const mutation = useMutation({
+    mutationFn: async ({ email, password }: { email: string; password: string }) => {
+      // 1) authenticate -> tokens
+      const { data } = await login({ email, password });
+      // 2) store tokens (persist middleware writes localStorage automatically)
+      useAuthStore.getState().setTokens(data.access_token, data.refresh_token);
+      // 3) fetch full profile and cache it in the store
+      const me = await getCurrentUser();
+      useAuthStore.getState().setUser(me.data);
+    },
+    onSuccess: () => navigate("/", { replace: true }),
+    // On error: mutation.error is rendered by <ErrorMessage /> below
+  });
+
+  return (
+    <div className="flex min-h-svh items-center justify-center bg-gray-100 px-4">
+      <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
+        <h1 className="mb-6 text-2xl font-semibold text-gray-900">Log in to Bookly</h1>
+
+        {mutation.isError && (
+          <div className="mb-4">
+            <ErrorMessage error={mutation.error} />
+          </div>
+        )}
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            mutation.mutate({ email: email.trim(), password });
+          }}
+          className="space-y-4"
+        >
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              Password
+            </label>
+            <div className="relative mt-1">
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                required
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 pr-16 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="absolute inset-y-0 right-2 text-xs font-medium text-purple-600 hover:text-purple-800"
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={mutation.isPending}
+            aria-busy={mutation.isPending}
+            className="w-full rounded-md bg-purple-600 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {mutation.isPending ? "Signing in…" : "Log in"}
+          </button>
+        </form>
+
+        <div className="mt-4 flex justify-between text-sm">
+          <Link to="/forgot-password" className="text-purple-600 hover:underline">
+            Forgot password?
+          </Link>
+          <span className="text-gray-600">
+            No account?{" "}
+            <Link to="/signup" className="text-purple-600 hover:underline">
+              Sign up
+            </Link>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+#### 2.3.3 Register the route (`src/router.tsx`)
+
+Incremental — only `/login` for now; remaining auth routes land in 2.9:
+
+```tsx
+children: [
+  { path: "login", element: <LoginPage /> },
+],
+```
+
+Public route — stays outside any future `<ProtectedRoute />` wrapper.
+
+#### 2.3.4 Backend behavior notes
+
+- Bad credentials → `400` `{ message: "Invalid Email Or Password", error_code: "invalid_email_or_password" }` (`InvalidCredentials` handler in `src/errors.py`)
+- Rate limit exceeded → SlowAPI returns `429` with a NON-standard body (no `{message, error_code}` shape) → `parseApiError` falls back to `"An unexpected error occurred"`. Acceptable.
+- Backend down / network error → same fallback path.
+
+#### 2.3.5 Verification
+
+1. `cd bookly-frontend && npx tsc --noEmit && npm run lint` — clean
+2. Smoke test (backend `fastapi dev src/` on :8000, frontend `npm run dev` on :5173):
+   - `/login` renders a centered card — no leftover template-CSS artifacts (no fixed-width bordered column)
+   - Wrong creds → red alert box: "Invalid Email Or Password"
+   - Correct creds → redirects to `/`; DevTools → Local Storage shows `bookly-auth` with access + refresh tokens and user
+   - Browser refresh → still logged in (Zustand `persist`)
+   - Submit twice fast → button disabled, label "Signing in…" while in flight
 
 ### 2.4 Build `<SignupPage />`
 
@@ -649,10 +834,10 @@ export function useCurrentUser() {
 - Simple spinner or skeleton component
 - Accept optional `fullPage` prop for centered full-page loading
 
-**`<ErrorMessage />`** (`src/components/ErrorMessage.tsx`):
+**`<ErrorMessage />`** (`src/components/ErrorMessage.tsx`) — already built in step 2.3 (pulled forward because LoginPage depends on it; do not duplicate):
 - Accept `error: unknown` prop
-- Use `parseApiError(error)` to extract `message` and `error_code`
-- Render in a styled div with the error message
+- Use `parseApiError(error)` from `src/lib/error.ts` to extract `message` and `resolution`
+- Render in a styled div (`role="alert"`, red styling) with the error message
 
 **`<NavBar />`** (`src/components/NavBar.tsx`):
 - If authenticated: show user email, "Books", "Logout" button
