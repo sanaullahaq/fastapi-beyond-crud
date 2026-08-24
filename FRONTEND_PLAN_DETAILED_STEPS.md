@@ -56,9 +56,13 @@ src/
   main.tsx                  # App entry — mounts <App /> inside QueryClientProvider + RouterProvider
   App.tsx                   # Root component — renders <Outlet /> from react-router
   types/
-    index.ts                # All shared TypeScript interfaces
+    users.ts                # UserOut, auth payloads (UserCreate, UserLogin, LoginResponse, UserDetailOut, ...)
+    books.ts                # BookBase/BookCreate/BookUpdate/BookOut/BookDetailOut
+    reviews.ts              # ReviewBase/ReviewCreate/ReviewOut
+    tags.ts                 # TagOut/TagCreate/TagAdd
+    apiErrorPayload.ts      # Backend error shape { message, resolution?, error_code }
   lib/
-    api.ts                  # Axios instance + request/response interceptors (refresh flow)
+    apiClient.ts            # Axios instance + request/response interceptors (refresh flow)
     queryClient.ts          # QueryClient factory
     errors.ts               # Normalized ApiError class + helper
   features/
@@ -102,27 +106,45 @@ src/
       handlers.ts           # Per-feature mock handlers
 ```
 
-### 1.6 Define shared TypeScript types (`src/types/index.ts`)
+### 1.6 Shared TypeScript types (`src/types/*.ts` — implemented, per-domain files)
 
-Mirror every Pydantic response schema. All fields must match the backend exactly.
+Types live in five domain files mirroring the Pydantic schemas. Conventions: `*Out` = response shapes, `*Create`/`*Update` = request bodies. All fields must match the backend exactly.
+
+**`src/types/users.ts`:**
 
 ```ts
+import type { BookOut } from "./books";
+import type { ReviewOut } from "./reviews";
+
 // --- Users ---
-export interface User {
-  uid: string;               // uuid serialized as string
+export interface UserOut {
+  uid: string; // uuid serialized as string
   username: string;
   email: string;
   first_name: string;
   last_name: string;
   is_verified: boolean;
-  created_at: string;        // ISO datetime string
+  created_at: string; // ISO datetime string
   updated_at: string;
   // password_hash is excluded by Field(exclude=True) — never sent to frontend
 }
 
 export interface UserCreateResponse {
   message: string;
-  user: User;
+  user: UserOut;
+}
+
+export interface UserCreate {
+  first_name: string;
+  last_name: string;
+  username: string;
+  email: string;
+  password: string;
+}
+
+export interface UserLogin {
+  email: string;
+  password: string;
 }
 
 export interface LoginResponse {
@@ -130,7 +152,7 @@ export interface LoginResponse {
   access_token: string;
   refresh_token: string;
   user: {
-    user: string;            // email
+    user: string; // email
     uid: string;
   };
 }
@@ -139,37 +161,39 @@ export interface RefreshResponse {
   access_token: string;
 }
 
+export interface UserDetailOut extends UserOut {
+  books: BookOut[];
+  reviews: ReviewOut[];
+}
+
+export interface PasswordResetRequest {
+  email: string;
+}
+
+export interface PasswordResetConfirm {
+  new_password: string;
+  confirm_new_password: string;
+}
+```
+
+**`src/types/books.ts`:**
+
+```ts
+import type { ReviewOut } from "./reviews";
+import type { TagOut } from "./tags";
+
 // --- Books ---
-export interface Tag {
-  uid: string;
-  name: string;
-  created_at: string;
-}
 
-export interface Book {
-  uid: string;
+export interface BookBase {
   title: string;
   author: string;
   publisher: string;
   page_count: number;
   language: string;
-  published_date: string;    // "YYYY-MM-DD"
-  tags: Tag[];
-  created_at: string;
-  updated_at: string;
 }
 
-export interface BookDetail extends Book {
-  reviews: Review[];
-}
-
-export interface BookCreate {
-  title: string;
-  author: string;
-  publisher: string;
-  page_count: number;
-  language: string;
-  published_date?: string;   // defaults to "YYYY-MM-DD" on backend
+export interface BookCreate extends BookBase {
+  published_date: string;
 }
 
 export interface BookUpdate {
@@ -181,23 +205,52 @@ export interface BookUpdate {
   published_date?: string;
 }
 
-// --- Reviews ---
-export interface Review {
+export interface BookOut extends BookBase {
   uid: string;
-  rating: number;            // 1–5
+  published_date: string; // "YYYY-MM-DD"
+  tags: TagOut[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BookDetailOut extends BookOut {
+  reviews: ReviewOut[];
+  tags: TagOut[];
+}
+```
+
+**`src/types/reviews.ts`:**
+
+```ts
+// --- Reviews ---
+
+export interface ReviewBase {
+  rating: number;            // 1–5 (backend validates Field(le=5), ge=1)
   review_text: string;
+}
+
+export interface ReviewOut extends ReviewBase {
+  uid: string;
   user_uid: string | null;
   book_uid: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export interface ReviewCreate {
-  rating: number;
-  review_text: string;
+export interface ReviewCreate extends ReviewBase {}
+```
+
+**`src/types/tags.ts`:**
+
+```ts
+// --- Tags ---
+
+export interface TagOut {
+  uid: string;
+  name: string;
+  created_at: string;
 }
 
-// --- Tags ---
 export interface TagCreate {
   name: string;
 }
@@ -205,7 +258,11 @@ export interface TagCreate {
 export interface TagAdd {
   tags: TagCreate[];
 }
+```
 
+**`src/types/apiErrorPayload.ts`:**
+
+```ts
 // --- API Error shape (matches errors.py register_all_errors) ---
 export interface ApiErrorPayload {
   message: string;
@@ -214,7 +271,9 @@ export interface ApiErrorPayload {
 }
 ```
 
-### 1.7 Build the Axios instance with refresh interceptor (`src/lib/api.ts`)
+Dependency graph: `users.ts` → `books.ts`, `reviews.ts`; `books.ts` → `reviews.ts`, `tags.ts`.
+
+### 1.7 Build the Axios instance with refresh interceptor (`src/lib/apiClient.ts`)
 
 **Key behaviors from `src/auth/routes.py`:**
 
@@ -230,13 +289,13 @@ Implementation outline:
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { useAuthStore } from "../features/auth/authStore";
 
-const api = axios.create({
+const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
   headers: { "Content-Type": "application/json" },
 });
 
 // --- Request interceptor: attach access_token ---
-api.interceptors.request.use((config) => {
+apiClient.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
 
   if (token) {
@@ -263,7 +322,7 @@ const processQueue = (token: string | null, error: unknown) => {
   failedQueue = [];
 };
 
-api.interceptors.response.use(
+apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & {
@@ -284,7 +343,7 @@ api.interceptors.response.use(
         failedQueue.push({ resolve, reject });
       }).then((token) => {
         originalRequest.headers.Authorization = `Bearer ${token}`;
-        return api(originalRequest);
+        return apiClient(originalRequest);
       });
     }
 
@@ -310,7 +369,7 @@ api.interceptors.response.use(
       processQueue(newAccessToken, null);
 
       originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
-      return api(originalRequest);
+      return apiClient(originalRequest);
     } catch (refreshError) {
       processQueue(null, refreshError);
       //Refresh failed -> logout -> redirect
@@ -323,7 +382,7 @@ api.interceptors.response.use(
   },
 );
 
-export default api;
+export default apiClient;
 
 ```
 
@@ -386,15 +445,15 @@ export function parseApiError(error: unknown): ApiErrorPayload {
 ```ts
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { User } from "../../types";
+import type { UserOut } from "../../types/users";
 
 interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
-  user: User | null;
+  user: UserOut | null;
   setTokens: (access: string, refresh: string) => void;
   setAccessToken: (token: string) => void;
-  setUser: (user: User) => void;
+  setUser: (user: UserOut) => void;
   logout: () => void;
   isAuthenticated: () => boolean;
 }
@@ -521,50 +580,40 @@ Each function maps 1:1 to a backend route.
 | `verifyEmail(token)` | `GET /auth/verify/{token}` | — | `{ message }` |
 | `requestPasswordReset(data)` | `POST /auth/password-reset-request` | `{ email }` | `{ message }` |
 | `resetPassword(token, data)` | `POST /auth/password-reset-confirm/{token}` | `{ new_password, confirm_new_password }` | `{ message }` |
-| `getCurrentUser()` | `GET /auth/me` | — | Full `UserBooksOut` (user + books + reviews) |
+| `getCurrentUser()` | `GET /auth/me` | — | Full `UserDetailOut` (user + books + reviews) |
 
 ```ts
-import api from "../../../lib/api";
+import apiClient from "../../lib/apiClient";
 import type {
-  User,
   UserCreateResponse,
+  UserCreate,
   LoginResponse,
-  Tag,
-  Book,
-  Review,
-  ReviewCreate,
-  TagCreate,
-  TagAdd,
-  BookCreate,
-  BookUpdate,
-} from "../../../types";
+  RefreshResponse,
+  UserDetailOut,
+  PasswordResetRequest,
+  PasswordResetConfirm,
+  UserLogin,
+} from "../../types/users";
 
 // Auth
-export const signup = (data: {
-  first_name: string;
-  last_name: string;
-  username: string;
-  email: string;
-  password: string;
-}) => api.post<UserCreateResponse>("/auth/signup", data);
+export const signup = (data: UserCreate) =>
+  apiClient.post<UserCreateResponse>("/auth/signup", data);
 
-export const login = (data: { email: string; password: string }) =>
-  api.post<LoginResponse>("/auth/login", data);
+export const login = (data: UserLogin) =>
+  apiClient.post<LoginResponse>("/auth/login", data);
 
-export const logout = () => api.get("/auth/logout");
+export const logout = () => apiClient.get("/auth/logout");
 
 export const verifyEmail = (token: string) =>
-  api.get(`/auth/verify/${token}`);
+  apiClient.get(`/auth/verify/${token}`);
 
-export const requestPasswordReset = (data: { email: string }) =>
-  api.post("/auth/password-reset-request", data);
+export const requestPasswordReset = (data: PasswordResetRequest) =>
+  apiClient.post("/auth/password-reset-request", data);
 
-export const resetPassword = (
-  token: string,
-  data: { new_password: string; confirm_new_password: string }
-) => api.post(`/auth/password-reset-confirm/${token}`, data);
+export const resetPassword = (token: string, data: PasswordResetConfirm) =>
+  apiClient.post(`/auth/password-reset-confirm/${token}`, data);
 
-export const getCurrentUser = () => api.get("/auth/me");
+export const getCurrentUser = () => apiClient.get<UserDetailOut>("/auth/me");
 ```
 
 ### 2.2 Create `useCurrentUser` query (`src/features/auth/queries.ts`)
@@ -580,7 +629,7 @@ export function useCurrentUser() {
     queryKey: ["currentUser"],
     queryFn: async () => {
       const { data } = await getCurrentUser();
-      return data;  // UserBooksOut
+      return data;  // UserDetailOut
     },
     enabled: isAuthenticated(),
     staleTime: 5 * 60 * 1000,
@@ -925,29 +974,34 @@ Books CRUD: typed API client, TanStack Query hooks with cache invalidation, Book
 
 | Function | Backend route | Auth required | Request body | Response |
 |---|---|---|---|---|
-| `getBooks()` | `GET /books/` | Yes | — | `Book[]` |
-| `getBook(uid)` | `GET /books/{uid}` | Yes | — | `BookDetail` |
-| `createBook(data)` | `POST /books/` | Yes | `BookCreate` | `Book` |
-| `updateBook(uid, data)` | `PATCH /books/{uid}` | Yes | `BookUpdate` | `Book` |
+| `getBooks()` | `GET /books/` | Yes | — | `BookOut[]` |
+| `getBook(uid)` | `GET /books/{uid}` | Yes | — | `BookDetailOut` |
+| `createBook(data)` | `POST /books/` | Yes | `BookCreate` | `BookOut` |
+| `updateBook(uid, data)` | `PATCH /books/{uid}` | Yes | `BookUpdate` | `BookOut` |
 | `deleteBook(uid)` | `DELETE /books/{uid}` | Yes | — | 204 (empty) |
 
 ```ts
-import api from "../../../lib/api";
-import type { Book, BookDetail, BookCreate, BookUpdate } from "../../../types";
+import apiClient from "../../lib/apiClient";
+import type {
+  BookOut,
+  BookDetailOut,
+  BookCreate,
+  BookUpdate,
+} from "../../types/books";
 
-export const getBooks = () => api.get<Book[]>("/books/");
+export const getBooks = () => apiClient.get<BookOut[]>("/books/");
 
 export const getBook = (uid: string) =>
-  api.get<BookDetail>(`/books/${uid}`);
+  apiClient.get<BookDetailOut>(`/books/${uid}`);
 
 export const createBook = (data: BookCreate) =>
-  api.post<Book>("/books/", data);
+  apiClient.post<BookOut>("/books/", data);
 
 export const updateBook = (uid: string, data: BookUpdate) =>
-  api.patch<Book>(`/books/${uid}`, data);
+  apiClient.patch<BookOut>(`/books/${uid}`, data);
 
 export const deleteBook = (uid: string) =>
-  api.delete(`/books/${uid}`);   // returns 204
+  apiClient.delete(`/books/${uid}`); // returns 204
 ```
 
 **Error shapes from `errors.py`:**
@@ -960,7 +1014,7 @@ export const deleteBook = (uid: string) =>
 ```ts
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getBooks, getBook, createBook, updateBook, deleteBook } from "./api";
-import type { BookCreate, BookUpdate } from "../../types";
+import type { BookCreate, BookUpdate } from "../../types/books";
 
 export const bookKeys = {
   all: ["books"] as const,
@@ -1082,25 +1136,25 @@ Reviews + Tags: add/delete reviews inline on BookDetail, TagChips with add/remov
 
 | Function | Backend route | Auth required | Request body | Response |
 |---|---|---|---|---|
-| `getReviews()` | `GET /reviews/` | Admin only | — | `Review[]` |
-| `getReview(uid)` | `GET /reviews/{uid}` | User/Admin | — | `Review` |
-| `addReview(bookUid, data)` | `POST /reviews/book/{book_uid}` | User/Admin | `ReviewCreate` | `Review` |
+| `getReviews()` | `GET /reviews/` | Admin only | — | `ReviewOut[]` |
+| `getReview(uid)` | `GET /reviews/{uid}` | User/Admin | — | `ReviewOut` |
+| `addReview(bookUid, data)` | `POST /reviews/book/{book_uid}` | User/Admin | `ReviewCreate` | `ReviewOut` |
 | `deleteReview(uid)` | `DELETE /reviews/{uid}` | User/Admin | — | 204 |
 
 ```ts
-import api from "../../../lib/api";
-import type { Review, ReviewCreate } from "../../../types";
+import apiClient from "../../lib/apiClient";
+import type { ReviewOut, ReviewCreate } from "../../types/reviews";
 
-export const getReviews = () => api.get<Review[]>("/reviews/");
+export const getReviews = () => apiClient.get<ReviewOut[]>("/reviews/");
 
 export const getReview = (uid: string) =>
-  api.get<Review>(`/reviews/${uid}`);
+  apiClient.get<ReviewOut>(`/reviews/${uid}`);
 
 export const addReview = (bookUid: string, data: ReviewCreate) =>
-  api.post<Review>(`/reviews/book/${bookUid}`, data);
+  apiClient.post<ReviewOut>(`/reviews/book/${bookUid}`, data);
 
 export const deleteReview = (uid: string) =>
-  api.delete(`/reviews/${uid}`);
+  apiClient.delete(`/reviews/${uid}`);
 ```
 
 **Error shapes:**
@@ -1112,7 +1166,7 @@ export const deleteReview = (uid: string) =>
 ```ts
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { addReview, deleteReview } from "./api";
-import type { ReviewCreate } from "../../types";
+import type { ReviewCreate } from "../../types/reviews";
 import { bookKeys } from "../books/queries";
 
 export const useAddReview = (bookUid: string) => {
@@ -1136,13 +1190,13 @@ export const useDeleteReview = (bookUid: string) => {
 };
 ```
 
-**Note:** Reviews are nested inside `BookDetailOut` (the `GET /books/{uid}` response includes `reviews: Review[]`). There is no standalone reviews list page for users — reviews are displayed inline on `<BookDetailPage />`. The `GET /reviews/` (admin-only) endpoint exists but is optional for Phase 4.
+**Note:** Reviews are nested inside `BookDetailOut` (the `GET /books/{uid}` response includes `reviews: ReviewOut[]`). There is no standalone reviews list page for users — reviews are displayed inline on `<BookDetailPage />`. The `GET /reviews/` (admin-only) endpoint exists but is optional for Phase 4.
 
 ### 4.3 Build `<ReviewList />`
 
 **File:** `src/features/reviews/ReviewList.tsx`
 
-- Accept `reviews: Review[]` prop (from `BookDetail.reviews`)
+- Accept `reviews: ReviewOut[]` prop (from `BookDetailOut.reviews`)
 - Render each review: rating (as stars or number), `review_text`, user UID, created_at
 - If the current user owns the review (`user.uid === review.user_uid`), show a delete button
 - Delete button: confirmation → `useDeleteReview(bookUid).mutateAsync(review.uid)`
@@ -1161,29 +1215,29 @@ export const useDeleteReview = (bookUid: string) => {
 
 | Function | Backend route | Auth required | Request body | Response |
 |---|---|---|---|---|
-| `getTags()` | `GET /tags/` | User/Admin | — | `Tag[]` |
-| `createTag(data)` | `POST /tags/` | User/Admin | `{ name }` | `Tag` |
-| `addTagsToBook(bookUid, data)` | `POST /tags/book/{book_uid}/tags` | User/Admin | `{ tags: [{ name }] }` | `Book` |
-| `updateTag(uid, data)` | `PUT /tags/{uid}` | User/Admin | `{ name }` | `Tag` |
+| `getTags()` | `GET /tags/` | User/Admin | — | `TagOut[]` |
+| `createTag(data)` | `POST /tags/` | User/Admin | `{ name }` | `TagOut` |
+| `addTagsToBook(bookUid, data)` | `POST /tags/book/{book_uid}/tags` | User/Admin | `{ tags: [{ name }] }` | `BookOut` |
+| `updateTag(uid, data)` | `PUT /tags/{uid}` | User/Admin | `{ name }` | `TagOut` |
 | `deleteTag(uid)` | `DELETE /tags/{uid}` | User/Admin | — | 204 |
 
 ```ts
-import api from "../../../lib/api";
-import type { Tag, TagCreate, TagAdd, Book } from "../../../types";
+import apiClient from "../../lib/apiClient";
+import type { TagOut, TagCreate, TagAdd, BookOut } from "../../types/tags";
 
-export const getTags = () => api.get<Tag[]>("/tags/");
+export const getTags = () => apiClient.get<TagOut[]>("/tags/");
 
 export const createTag = (data: TagCreate) =>
-  api.post<Tag>("/tags/", data);
+  apiClient.post<TagOut>("/tags/", data);
 
 export const addTagsToBook = (bookUid: string, data: TagAdd) =>
-  api.post<Book>(`/tags/book/${bookUid}/tags`, data);
+  apiClient.post<BookOut>(`/tags/book/${bookUid}/tags`, data);
 
 export const updateTag = (uid: string, data: TagCreate) =>
-  api.put<Tag>(`/tags/${uid}`, data);
+  apiClient.put<TagOut>(`/tags/${uid}`, data);
 
 export const deleteTag = (uid: string) =>
-  api.delete(`/tags/${uid}`);
+  apiClient.delete(`/tags/${uid}`);
 ```
 
 **Error shapes:**
@@ -1195,7 +1249,7 @@ export const deleteTag = (uid: string) =>
 ```ts
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getTags, createTag, addTagsToBook, updateTag, deleteTag } from "./api";
-import type { TagCreate, TagAdd } from "../../types";
+import type { TagCreate, TagAdd } from "../../types/tags";
 import { bookKeys } from "../books/queries";
 
 export const tagKeys = {
@@ -1252,7 +1306,7 @@ export const useDeleteTag = () => {
 
 **File:** `src/features/tags/TagChips.tsx`
 
-- Accept `bookUid: string` and `tags: Tag[]` props
+- Accept `bookUid: string` and `tags: TagOut[]` props
 - Render each tag as a chip/badge with its name
 - Include an "Add Tag" button that opens a small inline form:
   - Input field for tag name
@@ -1381,7 +1435,8 @@ afterAll(() => server.close());
 
 ```ts
 import { http, HttpResponse } from "msw";
-import type { LoginResponse, Book, BookDetail } from "../../types";
+import type { LoginResponse } from "../../types/users";
+import type { BookOut } from "../../types/books";
 
 const BASE = "http://localhost:8000/api/v1";
 
@@ -1412,7 +1467,7 @@ export const handlers = [
   }),
 
   http.get(`${BASE}/books/`, () => {
-    const books: Book[] = [
+    const books: BookOut[] = [
       {
         uid: "book-1",
         title: "The Great Gatsby",
