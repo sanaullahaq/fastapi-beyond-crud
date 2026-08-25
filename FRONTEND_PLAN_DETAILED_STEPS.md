@@ -835,17 +835,86 @@ Public route — stays outside any future `<ProtectedRoute />` wrapper.
    - Browser refresh → still logged in (Zustand `persist`)
    - Submit twice fast → button disabled, label "Signing in…" while in flight
 
-### 2.4 Build `<SignupPage />`
+### 2.4 Build `<SignupPage />` — DETAILED SPEC (approved, ready to implement)
 
-**File:** `src/features/auth/SignupPage.tsx`
+**Files touched:**
 
-- Form fields: `first_name`, `last_name`, `username`, `email`, `password`, `confirm_password`
-- Validate locally that `password === confirm_password` before sending (backend validates `new_password` match on reset, but not on signup)
-- Validate `username.length <= 8` and `email.length <= 40` per Pydantic `Field(max_length=...)` in `UserCreate` schema
-- Validate `password.length >= 6` per `PasswordStr = Annotated[str, Field(min_length=6)]`
-- On submit: `signup({ first_name, last_name, username, email, password })`
-- On success: show a "check your email" confirmation message, redirect to `/login`
-- On error: 403 `{ message: "User with email already exists", error_code: "user_exists" }` → display
+| File | Action |
+|---|---|
+| `src/features/auth/SignupPage.tsx` | Create |
+| `src/router.tsx` | Modify — register public `/signup` route |
+
+Out of scope: LoginPage's `/forget-password` → `/forgot-password` link typo (handled separately).
+
+#### 2.4.1 Backend contract (verified against `src/auth/schemas.py`)
+
+Request body (`UserCreate`) — all fields required:
+
+| Field | Constraint |
+|---|---|
+| `first_name` | ≤25 chars |
+| `last_name` | ≤25 chars |
+| `username` | ≤8 chars |
+| `email` | valid email format, ≤40 chars |
+| `password` | ≥6 chars (`PasswordStr = Annotated[str, Field(min_length=6)]`) |
+
+(Correction vs this section's earlier draft: `first_name`/`last_name` are also capped at 25.)
+
+Response `201`: `{ message, user: UserOut }`
+
+Errors:
+- `403 { message: "User with email already exists", error_code: "user_exists" }`
+- Rate limited: **5/hour per IP** (SlowAPI) → `429` with non-standard body → `parseApiError` falls back to generic message
+- FastAPI `422` validation failures also use a non-standard `{ detail: [...] }` shape — the client-side enforcement below ensures we never hit it from the UI
+
+#### 2.4.2 Form & validation strategy
+
+7 fields — six data fields plus client-only `confirm_password` (never sent to backend). HTML5 attributes mirror the backend schema exactly, so violations are blocked in-browser and opaque `422`s can't occur:
+
+| Field | HTML5 attributes |
+|---|---|
+| first_name / last_name | `required`, `maxLength={25}`, `autoComplete="given-name"` / `"family-name"` |
+| username | `required`, `maxLength={8}`, `autoComplete="username"` |
+| email | `required`, `type="email"`, `maxLength={40}`, `autoComplete="email"` |
+| password | `required`, `minLength={6}`, show/hide toggle (`Eye`/`EyeOff` from lucide-react, as on LoginPage) |
+| confirm_password | `required`; only custom rule: `password === confirm_password` → inline red text under field + `aria-invalid`, submit blocked |
+
+No form/validator library needed.
+
+#### 2.4.3 Flow
+
+```ts
+const mutation = useMutation({ mutationFn: (data: UserCreate) => signup(data) });
+```
+
+- **pending** → submit disabled, label "Creating account…"
+- **error** → `<ErrorMessage error={mutation.error} />` banner above form
+- **success** → swap form for **success panel** (DECIDED: auto-redirect + manual CTA):
+  - `CheckCircle2` icon (lucide-react), "Account created!" heading
+  - Backend `message` + "check your inbox (and spam)" note
+  - Visible 4-second countdown, then `navigate("/login", { replace: true })`
+  - "Go to Login" CTA works immediately
+  - Timer: `useEffect` + `setTimeout`, cleared on unmount
+- Signup does **not** authenticate the user: no `setTokens`/`setUser` calls, nothing written to `localStorage` (verification + login still required)
+
+#### 2.4.4 Styling & conventions
+
+Mirror `LoginPage.tsx` exactly — same card layout utilities, input styling, Eye/EyeOff toggle pattern, disabled-button treatment. No styling-system changes in this step (UI-primitive extraction stays parked; refactor both pages uniformly later if that path is chosen).
+
+Footer link: "Already have an account? Log in" → `/login`.
+
+Accessibility: `htmlFor`/`id` pairs, `aria-invalid` on mismatched confirm field, `aria-busy` on submit button.
+
+#### 2.4.5 Verification
+
+1. `cd bookly-frontend && npx tsc --noEmit && npm run lint` — clean
+2. Smoke test:
+   - Typing >8 chars into username impossible (`maxLength` blocks input)
+   - Password mismatch → inline red text under confirm field, **zero network requests** fired
+   - Existing email → red banner: "User with email already exists"
+   - Valid submit → success panel with visible countdown → auto-redirects to `/login`
+   - DevTools → Local Storage shows **no** `bookly-auth` entry after signup
+   - 6th signup attempt within an hour → generic rate-limit banner
 
 ### 2.5 Build `<VerifyEmailPage />`
 
@@ -958,7 +1027,7 @@ export const router = createBrowserRouter([
 
 1. Run backend: `fastapi dev src/` (port 8000)
 2. Run frontend: `npm run dev` (port 5173)
-3. Sign up → see "check email" message
+3. Sign up → success panel ("check your inbox") appears, auto-redirects to `/login` after ~4s; confirm NO `bookly-auth` localStorage entry yet (see 2.4.5)
 4. Manually call verify endpoint (backend sends email via Celery, or hit the link directly)
 5. Login → confirm `localStorage` has `bookly-auth` key with tokens + user
 6. Refresh page → confirm tokens persist (Zustand `persist` middleware)
