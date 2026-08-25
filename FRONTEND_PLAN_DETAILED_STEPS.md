@@ -897,7 +897,256 @@ const mutation = useMutation({ mutationFn: (data: UserCreate) => signup(data) })
   - Timer: `useEffect` + `setTimeout`, cleared on unmount
 - Signup does **not** authenticate the user: no `setTokens`/`setUser` calls, nothing written to `localStorage` (verification + login still required)
 
-#### 2.4.4 Styling & conventions
+#### 2.4.4 Full implementation (`src/features/auth/SignupPage.tsx`)
+
+```tsx
+import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useMutation } from "@tanstack/react-query";
+import { CheckCircle2, Eye, EyeOff } from "lucide-react";
+import { signup } from "./api";
+import ErrorMessage from "../../components/ErrorMessage";
+import type { UserCreate } from "../../types/users";
+
+const initialForm: UserCreate & { confirm_password: string } = {
+  first_name: "",
+  last_name: "",
+  username: "",
+  email: "",
+  password: "",
+  confirm_password: "",
+};
+
+export default function SignupPage() {
+  const navigate = useNavigate();
+  const [form, setForm] = useState(initialForm);
+  const [showPassword, setShowPassword] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(4);
+
+  const mutation = useMutation({ mutationFn: (data: UserCreate) => signup(data) });
+
+  // Success panel: visible countdown -> auto-redirect (timer cleared on unmount)
+  useEffect(() => {
+    if (!mutation.isSuccess) return;
+    const interval = setInterval(() => setSecondsLeft((s) => s - 1), 1000);
+    const timeout = setTimeout(() => navigate("/login", { replace: true }), 4000);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [mutation.isSuccess, navigate]);
+
+  const update =
+    (field: keyof typeof initialForm) =>
+    (e: ChangeEvent<HTMLInputElement>) =>
+      setForm((f) => ({ ...f, [field]: e.target.value }));
+
+  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (form.password !== form.confirm_password) {
+      setConfirmError("Passwords do not match");
+      return;
+    }
+    setConfirmError(null);
+    // Explicit field map -> exact UserCreate shape; confirm_password never sent
+    const data: UserCreate = {
+      first_name: form.first_name,
+      last_name: form.last_name,
+      username: form.username,
+      email: form.email,
+      password: form.password,
+    };
+    mutation.mutate(data);
+  };
+
+  // --- Success panel ---
+  if (mutation.isSuccess) {
+    return (
+      <div className="flex min-h-svh items-center justify-center bg-gray-100 px-4">
+        <div className="w-full max-w-md rounded-lg bg-white p-8 text-center shadow-md">
+          <CheckCircle2 size={48} className="mx-auto text-green-600" />
+          <h1 className="mb-2 mt-4 text-2xl font-semibold text-gray-900">
+            Account created!
+          </h1>
+          <p className="text-sm text-gray-600">
+            {mutation.data?.message} Please check your inbox (and spam folder).
+          </p>
+          <p className="mt-2 text-sm text-gray-500">
+            Redirecting to login in {Math.max(secondsLeft, 0)}s…
+          </p>
+          <Link
+            to="/login"
+            className="mt-6 inline-block rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700"
+          >
+            Go to Login
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Signup form ---
+  return (
+    <div className="flex min-h-svh items-center justify-center bg-gray-100 px-4">
+      <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
+        <h1 className="mb-6 text-2xl font-semibold text-gray-900">
+          Create your account
+        </h1>
+
+        {mutation.isError && (
+          <div className="mb-4">
+            <ErrorMessage error={mutation.error} />
+          </div>
+        )}
+
+        <form onSubmit={onSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="first_name" className="block text-sm font-medium text-gray-700">
+                First name
+              </label>
+              <input
+                id="first_name"
+                required
+                maxLength={25}
+                autoComplete="given-name"
+                value={form.first_name}
+                onChange={update("first_name")}
+                placeholder="Jane"
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+              />
+            </div>
+            <div>
+              <label htmlFor="last_name" className="block text-sm font-medium text-gray-700">
+                Last name
+              </label>
+              <input
+                id="last_name"
+                required
+                maxLength={25}
+                autoComplete="family-name"
+                value={form.last_name}
+                onChange={update("last_name")}
+                placeholder="Doe"
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="username" className="block text-sm font-medium text-gray-700">
+              Username
+            </label>
+            <input
+              id="username"
+              required
+              maxLength={8}
+              autoComplete="username"
+              value={form.username}
+              onChange={update("username")}
+              placeholder="janedoe"
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              required
+              maxLength={40}
+              autoComplete="email"
+              value={form.email}
+              onChange={update("email")}
+              placeholder="you@example.com"
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              Password
+            </label>
+            <div className="relative mt-1">
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                required
+                minLength={6}
+                autoComplete="new-password"
+                value={form.password}
+                onChange={update("password")}
+                placeholder="At least 6 characters"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 pr-16 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="absolute inset-y-0 right-2 text-xs font-medium text-purple-600 hover:text-purple-800"
+              >
+                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="confirm_password" className="block text-sm font-medium text-gray-700">
+              Confirm password
+            </label>
+            <input
+              id="confirm_password"
+              type={showPassword ? "text" : "password"}
+              required
+              minLength={6}
+              autoComplete="new-password"
+              value={form.confirm_password}
+              aria-invalid={!!confirmError}
+              onChange={(e) => {
+                update("confirm_password")(e);
+                setConfirmError(null); // clear error as soon as user retypes
+              }}
+              placeholder="Repeat password"
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+            />
+            {confirmError && (
+              <p className="mt-1 text-xs text-red-600">{confirmError}</p>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={mutation.isPending}
+            aria-busy={mutation.isPending}
+            className="w-full rounded-md bg-purple-600 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {mutation.isPending ? "Creating account..." : "Sign up"}
+          </button>
+        </form>
+
+        <p className="mt-4 text-center text-sm text-gray-600">
+          Already have an account?{" "}
+          <Link to="/login" className="text-purple-600 hover:underline">
+            Log in
+          </Link>
+        </p>
+      </div>
+    </div>
+  );
+}
+```
+
+Router addition (`src/router.tsx`):
+
+```tsx
+{ path: "signup", element: <SignupPage /> },
+```
+
+#### 2.4.5 Styling & conventions
 
 Mirror `LoginPage.tsx` exactly — same card layout utilities, input styling, Eye/EyeOff toggle pattern, disabled-button treatment. No styling-system changes in this step (UI-primitive extraction stays parked; refactor both pages uniformly later if that path is chosen).
 
@@ -905,7 +1154,7 @@ Footer link: "Already have an account? Log in" → `/login`.
 
 Accessibility: `htmlFor`/`id` pairs, `aria-invalid` on mismatched confirm field, `aria-busy` on submit button.
 
-#### 2.4.5 Verification
+#### 2.4.6 Verification
 
 1. `cd bookly-frontend && npx tsc --noEmit && npm run lint` — clean
 2. Smoke test:
@@ -1027,7 +1276,7 @@ export const router = createBrowserRouter([
 
 1. Run backend: `fastapi dev src/` (port 8000)
 2. Run frontend: `npm run dev` (port 5173)
-3. Sign up → success panel ("check your inbox") appears, auto-redirects to `/login` after ~4s; confirm NO `bookly-auth` localStorage entry yet (see 2.4.5)
+3. Sign up → success panel ("check your inbox") appears, auto-redirects to `/login` after ~4s; confirm NO `bookly-auth` localStorage entry yet (see 2.4.6)
 4. Manually call verify endpoint (backend sends email via Celery, or hit the link directly)
 5. Login → confirm `localStorage` has `bookly-auth` key with tokens + user
 6. Refresh page → confirm tokens persist (Zustand `persist` middleware)
