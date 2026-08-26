@@ -9,6 +9,8 @@ import jwt
 from src.config import Config
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
+from src.errors import VerificationTokenExpired, VerificationTokenInvalid
+
 """
     Did not follow the same approach as in the tutorial as passlib library is not under active maintenance
 """
@@ -94,10 +96,12 @@ def decode_url_safe_token(token: str, max_age=300) -> dict | None:
         data = serializer.loads(token, max_age=max_age)
         return data
     except SignatureExpired:
-        raise HTTPException(
-            detail="Token has expired", status_code=status.HTTP_400_BAD_REQUEST
-        )
+        # raise HTTPException(
+        #     detail="Token has expired", status_code=status.HTTP_400_BAD_REQUEST
+        # )
+        raise VerificationTokenExpired()
         # If the token is expired, it raises a SignatureExpired exception
     except BadSignature:
-        raise HTTPException(detail="Invalid Token", status_code=status.HTTP_400_BAD_REQUEST)
+        # raise HTTPException(detail="Invalid Token", status_code=status.HTTP_400_BAD_REQUEST)
+        raise VerificationTokenInvalid()
         # If the token is invalid for any other reason, it raises a BadSignature exception

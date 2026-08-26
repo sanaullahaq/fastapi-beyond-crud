@@ -95,6 +95,14 @@ class AccountNotVerified(BooklyException):
     pass
 
 
+class VerificationTokenExpired(BooklyException):
+    """Verification token has expired"""
+
+
+class VerificationTokenInvalid(BooklyException):
+    """Verification token invalid"""
+
+
 def create_exception_handler(
     status_code: int, initial_detail: Any
 ) -> Callable[[Request, Exception], JSONResponse]:
@@ -276,6 +284,30 @@ def register_all_errors(app: FastAPI):
                 "message": "Account Not verified",
                 "error_code": "account_not_verified",
                 "resolution": "Please check your email for verification details",
+            },
+        ),
+    )
+
+    app.add_exception_handler(
+        VerificationTokenExpired,
+        create_exception_handler(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            initial_detail={
+                "message": "Token has expired",
+                "error_code": "verification_token_expired",
+                "resolution": "Contact support",
+            },
+        ),
+    )
+
+    app.add_exception_handler(
+        VerificationTokenInvalid,
+        create_exception_handler(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            initial_detail={
+                "message": "Invalid Token",
+                "error_code": "verification_token_invalid",
+                "resolution": "Contact support",
             },
         ),
     )
