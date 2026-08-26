@@ -35,7 +35,12 @@
     - [2.4.4 Full implementation (`src/features/auth/SignupPage.tsx`)](#244-full-implementation-srcfeaturesauthsignuppagetsx)
     - [2.4.5 Styling & conventions](#245-styling--conventions)
     - [2.4.6 Verification](#246-verification)
-  - [2.5 Build `<VerifyEmailPage />`](#25-build-verifyemailpage-)
+  - [2.5 Build `<VerifyEmailPage />` — DETAILED SPEC](#25-build-verifyemailpage---detailed-spec)
+    - [2.5.1 Backend contract (from `src/auth/routes.py:86-107`)](#251-backend-contract-from-srcauthroutespy86-107)
+    - [2.5.2 Design decisions](#252-design-decisions)
+    - [2.5.3 Full implementation (`src/features/auth/VerifyEmailPage.tsx`)](#253-full-implementation-srcfeaturesauthverifyemailpagetsx)
+    - [2.5.4 Router update (`src/router.tsx`)](#254-router-update-srcroutertsx)
+    - [2.5.5 Verification](#255-verification)
   - [2.6 Build `<ForgotPasswordPage />`](#26-build-forgotpasswordpage-)
   - [2.7 Build `<ResetPasswordPage />`](#27-build-resetpasswordpage-)
   - [2.8 Build shared components](#28-build-shared-components)
@@ -1245,16 +1250,144 @@ Accessibility: `htmlFor`/`id` pairs, `aria-invalid` on mismatched confirm field,
    - DevTools → Local Storage shows **no** `bookly-auth` entry after signup
    - 6th signup attempt within an hour → generic rate-limit banner
 
-### 2.5 Build `<VerifyEmailPage />`
+### 2.5 Build `<VerifyEmailPage />` — DETAILED SPEC
 
 **File:** `src/features/auth/VerifyEmailPage.tsx`
 
-- Read `token` from URL: `const { token } = useParams<{ token: string }>()`
-- On mount, call `verifyEmail(token!)`
-- Show loading state → then success/error message
-- Link to `/login`
+**Files touched:**
+
+| File | Action |
+|---|---|
+| `src/features/auth/VerifyEmailPage.tsx` | Create |
+| `src/router.tsx` | Modify — register `/verify/:token` route |
+
+#### 2.5.1 Backend contract (from `src/auth/routes.py:86-107`)
+
+`GET /auth/verify/{token}` — no auth required, token is a URL-safe JWT containing `{ email }`.
+
+| Response | Status | Shape |
+|---|---|---|
+| Success | 200 | `{ message: "Account verified successfully" }` |
+| Token invalid / expired / user not found | 500 | `{ message: "Error occurred during verification" }` |
+
+The backend decodes the token, looks up the user by email, sets `is_verified: True`. If the token is expired or the user doesn't exist, it returns a generic 500 — intentionally vague to avoid leaking whether the email exists.
 
 **Note:** Backend link format is `http://localhost:8000/api/v1/auth/verify/{token}` (raw JSON response). For Phase 2, this page will be triggered manually or by copying the token. Later (Phase 5) can repoint backend links to `http://localhost:5173/verify/{token}`.
+
+#### 2.5.2 Design decisions
+
+- **`useQuery` over `useMutation`** — auto-fires on mount, no user action needed. `enabled: !!token` prevents firing if URL somehow has no token.
+- **No auto-redirect after success** — user should explicitly click "Log in" to see the confirmation and decide when to proceed.
+- **`retry: false`** — a bad/expired token will always fail; retrying wastes a round trip and delays the error state.
+- **Three UI states**: loading spinner → success card or error card. No conditional branching beyond these.
+- **No resend mechanism** — backend has no dedicated resend endpoint. Verification link is generated only at signup and expires in 5 minutes. We assume the user verifies within that window.
+
+#### 2.5.3 Full implementation (`src/features/auth/VerifyEmailPage.tsx`)
+
+```tsx
+import { useQuery } from "@tanstack/react-query";
+import { Link, useParams } from "react-router-dom";
+import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { verifyEmail } from "./api";
+import ErrorMessage from "../../components/ErrorMessage";
+
+export default function VerifyEmailPage() {
+  const { token } = useParams<{ token: string }>();
+
+  // useQuery auto-fires on mount — no user action needed.
+  // enabled: !!token guards against /verify without a token param.
+  // retry: false — a bad/expired token will always fail, no point retrying.
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ["verifyEmail", token],
+    queryFn: async () => {
+      const { data } = await verifyEmail(token!);
+      return data; // { message: "Account verified successfully" }
+    },
+    enabled: !!token,
+    retry: false,
+  });
+
+  return (
+    <div className="flex min-h-svh items-center justify-center bg-gray-100 px-4">
+      <div className="w-full max-w-md rounded-lg bg-white p-8 text-center shadow-md">
+        {/* --- Loading state --- */}
+        {isLoading && (
+          <>
+            <Loader2
+              size={48}
+              className="mx-auto animate-spin text-purple-600"
+            />
+            <h1 className="mb-2 mt-4 text-2xl font-semibold text-gray-900">
+              Verifying your email…
+            </h1>
+            <p className="text-sm text-gray-600">
+              This only takes a moment.
+            </p>
+          </>
+        )}
+
+        {/* --- Success state --- */}
+        {!isLoading && !isError && data && (
+          <>
+            <CheckCircle2 size={48} className="mx-auto text-green-600" />
+            <h1 className="mb-2 mt-4 text-2xl font-semibold text-gray-900">
+              Email verified!
+            </h1>
+            <p className="text-sm text-gray-600">{data.message}</p>
+            <Link
+              to="/login"
+              className="mt-6 inline-block rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700"
+            >
+              Log in
+            </Link>
+          </>
+        )}
+
+        {/* --- Error state --- */}
+        {!isLoading && isError && (
+          <>
+            <XCircle size={48} className="mx-auto text-red-600" />
+            <h1 className="mb-2 mt-4 text-2xl font-semibold text-gray-900">
+              Verification failed
+            </h1>
+            <div className="mb-4">
+              <ErrorMessage error={error} />
+            </div>
+            <p className="text-sm text-gray-500">
+              The link may be expired or already used.
+            </p>
+            <Link
+              to="/login"
+              className="mt-4 inline-block rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700"
+            >
+              Go to Login
+            </Link>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+#### 2.5.4 Router update (`src/router.tsx`)
+
+Add inside the children array (public route, no ProtectedRoute wrapper):
+
+```tsx
+import VerifyEmailPage from "./features/auth/VerifyEmailPage";
+
+{ path: "verify/:token", element: <VerifyEmailPage /> },
+```
+
+#### 2.5.5 Verification
+
+1. `cd bookly-frontend && npx tsc --noEmit` — clean
+2. Smoke test (backend `fastapi dev src/` on :8000, frontend `npm run dev` on :5173):
+   - Navigate to `/verify/some-invalid-token` → error card: "Verification failed" + backend message + "Go to Login" link
+   - Navigate to `/verify/` (no token) → page renders but query doesn't fire (`enabled: false`)
+   - After signup, copy the real token from the email Celery log and navigate to `/verify/{real-token}` → success card: "Email verified!" + "Log in" link
+   - Loading spinner visible during the network request (brief, ~200ms)
 
 ### 2.6 Build `<ForgotPasswordPage />`
 
