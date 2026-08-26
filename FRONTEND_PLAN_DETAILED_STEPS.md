@@ -1,5 +1,85 @@
 # Frontend Implementation — Detailed Steps
 
+<details>
+<summary>Table of Contents</summary>
+
+- [Phase 1 — Scaffold + Infrastructure](#phase-1--scaffold--infrastructure)
+  - [1.1 Create the Vite project](#11-create-the-vite-project)
+  - [1.2 Install core dependencies](#12-install-core-dependencies)
+  - [1.3 Install Tailwind CSS (DECIDED: CONFIRMED — installed)](#13-install-tailwind-css-decided-confirmed--installed)
+  - [1.4 Configure Vite environment variable](#14-configure-vite-environment-variable)
+  - [1.5 Define the project directory structure](#15-define-the-project-directory-structure)
+  - [1.6 Shared TypeScript types (`src/types/*.ts` — implemented, per-domain files)](#16-shared-typescript-types-srctypes-implemented-per-domain-files)
+  - [1.7 Build the Axios instance with refresh interceptor (`src/lib/apiClient.ts`)](#17-build-the-axios-instance-with-refresh-interceptor-srclibapiclientts)
+  - [1.8 Create the QueryClient factory (`src/lib/queryClient.ts`)](#18-create-the-queryclient-factory-srclibqueryclientts)
+  - [1.9 Create the normalized error helper (`src/lib/errors.ts`)](#19-create-the-normalized-error-helper-srcliberrorsts)
+  - [1.10 Build the Zustand auth store (`src/features/auth/authStore.ts`)](#110-build-the-zustand-auth-store-srcfeaturesauthauthstorets)
+  - [1.11 Create the `useAuth` hook (`src/features/auth/useAuth.ts`)](#111-create-the-useauth-hook-srcfeaturesauthuseauthts)
+  - [1.12 Wire up `main.tsx` and `App.tsx`](#112-wire-up-maintsx-and-apptx)
+  - [1.13 Create `router.tsx` (initial — no routes yet)](#113-create-routertsx-initial--no-routes-yet)
+  - [1.14 Verify the scaffold compiles](#114-verify-the-scaffold-compiles)
+- [Phase 2 — Auth Pages](#phase-2--auth-pages)
+  - [2.1 Build auth API helper (`src/features/auth/api.ts`)](#21-build-auth-api-helper-srcfeaturesauthapits)
+  - [2.2 Create `useCurrentUser` query (`src/features/auth/queries.ts`)](#22-create-usecurrentuser-query-srcfeaturesauthqueriests)
+  - [2.3 Build `<LoginPage />` — DETAILED SPEC (approved, ready to implement)](#23-build-loginpage----detailed-spec-approved-ready-to-implement)
+    - [2.3.0 Prerequisite cleanup — `src/index.css`](#230-prerequisite-cleanup--srcindextcss)
+    - [2.3.1 `<ErrorMessage />` (`src/components/ErrorMessage.tsx`)](#231-errormessage--srccomponentserrormessagetsx)
+    - [2.3.2 `<LoginPage />` (`src/features/auth/LoginPage.tsx`)](#232-loginpage--srcfeaturesauthloginpagetsx)
+    - [2.3.3 Register the route (`src/router.tsx`)](#233-register-the-route-srcroutertsx)
+    - [2.3.4 Backend behavior notes](#234-backend-behavior-notes)
+    - [2.3.5 Verification](#235-verification)
+  - [2.4 Build `<SignupPage />` — DETAILED SPEC (approved, ready to implement)](#24-build-signuppage----detailed-spec-approved-ready-to-implement)
+    - [2.4.1 Backend contract (verified against `src/auth/schemas.py`)](#241-backend-contract-verified-against-srcauthschemaspy)
+    - [2.4.2 Form & validation strategy](#242-form--validation-strategy)
+    - [2.4.3 Flow](#243-flow)
+    - [2.4.4 Full implementation (`src/features/auth/SignupPage.tsx`)](#244-full-implementation-srcfeaturesauthsignuppagetsx)
+    - [2.4.5 Styling & conventions](#245-styling--conventions)
+    - [2.4.6 Verification](#246-verification)
+  - [2.5 Build `<VerifyEmailPage />`](#25-build-verifyemailpage-)
+  - [2.6 Build `<ForgotPasswordPage />`](#26-build-forgotpasswordpage-)
+  - [2.7 Build `<ResetPasswordPage />`](#27-build-resetpasswordpage-)
+  - [2.8 Build shared components](#28-build-shared-components)
+  - [2.9 Update `router.tsx` with auth routes](#29-update-routertsx-with-auth-routes)
+  - [2.10 Manual smoke test for auth flow](#210-manual-smoke-test-for-auth-flow)
+- [Phase 3 — Books CRUD](#phase-3--books-crud)
+  - [3.1 Build books API helper (`src/features/books/api.ts`)](#31-build-books-api-helper-srcfeaturesbooksapits)
+  - [3.2 Create books queries/mutations (`src/features/books/queries.ts`)](#32-create-books-queriesmutations-srcfeaturesbooksqueriests)
+  - [3.3 Build `<BooksListPage />`](#33-build-bookslistpage-)
+  - [3.4 Build `<BookForm />`](#34-build-bookform-)
+  - [3.5 Build `<BookDetailPage />`](#35-build-bookdetailpage-)
+  - [3.6 Build books routes in `router.tsx`](#36-build-books-routes-in-routertsx)
+  - [3.7 Update NavBar to include Books link](#37-update-navbar-to-include-books-link)
+- [Phase 4 — Reviews + Tags](#phase-4--reviews--tags)
+  - [4.1 Build reviews API helper (`src/features/reviews/api.ts`)](#41-build-reviews-api-helper-srcfeaturesreviewsapits)
+  - [4.2 Create reviews queries/mutations (`src/features/reviews/queries.ts`)](#42-create-reviews-queriesmutations-srcfeaturesreviewsqueriests)
+  - [4.3 Build `<ReviewList />`](#43-build-reviewlist-)
+  - [4.4 Build `<ReviewForm />`](#44-build-reviewform-)
+  - [4.5 Build tags API helper (`src/features/tags/api.ts`)](#45-build-tags-api-helper-srcfeaturestagsapits)
+  - [4.6 Create tags queries/mutations (`src/features/tags/queries.ts`)](#46-create-tags-queriesmutations-srcfeaturestagsqueriests)
+  - [4.7 Build `<TagChips />`](#47-build-tagchips-)
+  - [4.8 Build `<TagsListPage />` (optional admin page)](#48-build-tagslistpage--optional-admin-page)
+  - [4.9 Update router for tags routes (optional)](#49-update-router-for-tags-routes-optional)
+- [Phase 5 — Polish + Tests](#phase-5--polish--tests)
+  - [5.1 Loading and empty states](#51-loading-and-empty-states)
+  - [5.2 Form validation polish](#52-form-validation-polish)
+  - [5.3 Error boundary](#53-error-boundary)
+  - [5.4 Optimistic updates (optional enhancement)](#54-optimistic-updates-optional-enhancement)
+  - [5.5 Vitest + React Testing Library setup](#55-vitest--react-testing-library-setup)
+  - [5.6 Write MSW handlers (`src/test/mocks/handlers.ts`)](#56-write-msw-handlers-srctestmockshandlersts)
+  - [5.7 Write sample test: auth store](#57-write-sample-test-auth-store)
+  - [5.8 Write sample test: LoginPage component](#58-write-sample-test-loginpage-component)
+  - [5.9 Write sample test: BooksListPage with MSW](#59-write-sample-test-bookslistpage-with-msw)
+  - [5.10 Run all tests](#510-run-all-tests)
+  - [5.11 Type-check the entire project](#511-type-check-the-entire-project)
+  - [5.12 Update `frontend/README.md`](#512-update-frontendreadmemd)
+  - [5.13 Lint check (if ESLint is configured)](#513-lint-check-if-eslint-is-configured)
+- [Cross-cutting concerns](#cross-cutting-concerns)
+  - [Backend email link repointing](#backend-email-link-repointing)
+  - [CORS](#cors)
+  - [Environment variable reference](#environment-variable-reference)
+
+</details>
+
 > Backend base URL: `http://localhost:8000/api/v1`
 > All request/response shapes below are derived from the actual Pydantic schemas and route handlers in the `src/` directory.
 
@@ -900,7 +980,7 @@ const mutation = useMutation({ mutationFn: (data: UserCreate) => signup(data) })
 #### 2.4.4 Full implementation (`src/features/auth/SignupPage.tsx`)
 
 ```tsx
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type SyntheticEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { CheckCircle2, Eye, EyeOff } from "lucide-react";
@@ -942,7 +1022,7 @@ export default function SignupPage() {
     (e: ChangeEvent<HTMLInputElement>) =>
       setForm((f) => ({ ...f, [field]: e.target.value }));
 
-  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const onSubmit = (e: SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (form.password !== form.confirm_password) {
       setConfirmError("Passwords do not match");
