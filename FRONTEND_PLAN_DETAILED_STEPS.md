@@ -53,7 +53,14 @@
     - [2.7.3 Full implementation (`src/features/auth/ResetAccountPassword.tsx`)](#273-full-implementation-srcfeaturesauthresetaccountpasswordtsx)
     - [2.7.4 Router registration (`src/router.tsx`)](#274-router-registration-srcroutertsx)
     - [2.7.5 Verification](#275-verification)
-  - [2.8 Build shared components](#28-build-shared-components)
+  - [2.8 Build shared components — DETAILED SPEC](#28-build-shared-components--detailed-spec)
+    - [2.8.1 `<ErrorMessage />` — already exists, reference only](#281-errormessage---already-exists-reference-only)
+    - [2.8.2 `<Loading />` — spinner](#282-loading---spinner)
+    - [2.8.3 `<NavBar />` — top nav, conditional on auth](#283-navbar---top-nav-conditional-on-auth)
+    - [2.8.4 `<ProtectedRoute />` — redirect if not authenticated](#284-protectedroute---redirect-if-not-authenticated)
+    - [2.8.5 `<Layout />` — NavBar + routed content](#285-layout---navbar--routed-content)
+    - [2.8.6 Wiring — `Layout` mounted via `App.tsx`](#286-wiring--layout-mounted-via-apptsx)
+    - [2.8.7 Verification](#287-verification)
   - [2.9 Update `router.tsx` with auth routes](#29-update-routertsx-with-auth-routes)
   - [2.10 Manual smoke test for auth flow](#210-manual-smoke-test-for-auth-flow)
 - [Phase 3 — Books CRUD](#phase-3--books-crud)
@@ -149,7 +156,7 @@ Create the following folders and placeholder files inside `bookly-frontend/src/`
 ```
 src/
   main.tsx                  # App entry — mounts <App /> inside QueryClientProvider + RouterProvider
-  App.tsx                   # Root component — renders <Outlet /> from react-router
+  App.tsx                   # Root component — renders <Layout /> (NavBar + <Outlet />)
   types/
     users.ts                # UserOut, auth payloads (UserCreate, UserLogin, LoginResponse, UserDetailOut, ...)
     books.ts                # BookBase/BookCreate/BookUpdate/BookOut/BookDetailOut
@@ -191,7 +198,7 @@ src/
     Layout.tsx              # NavBar + <Outlet />
     NavBar.tsx              # Links — conditional on auth state
     ProtectedRoute.tsx      # Redirects to /login if not authenticated
-    Loading.tsx             # Spinner / skeleton
+    Loading.tsx             # Spinner (Loader2), optional fullPage overlay
     ErrorMessage.tsx        # Renders ApiError.message
   router.tsx                # createBrowserRouter config
   test/
@@ -625,12 +632,14 @@ createRoot(document.getElementById("root")!).render(
 
 ```tsx
 // App.tsx
-import { Outlet } from "react-router-dom";
+import Layout from "./components/Layout";
 
 export default function App() {
-  return <Outlet />;
+  return <Layout />;
 }
 ```
+
+> Updated in §2.8.6: `App` now renders `<Layout />` (NavBar + `<Outlet />`) instead of the bare `<Outlet />`, once the shared components exist.
 
 ### 1.13 Create `router.tsx` (initial — no routes yet)
 
@@ -1777,44 +1786,173 @@ import ResetAccountPassword from "./features/auth/ResetAccountPassword";
    - Valid submit (real token copied from email Celery log, navigate to `/api/v1/auth/password-reset-confirm/{token}`) → "Complete!" panel + "Back to login"
    - Navigate with a bogus token → error banner (400/404/500 from backend)
 
-### 2.8 Build shared components
+### 2.8 Build shared components — DETAILED SPEC
 
-**`<Loading />`** (`src/components/Loading.tsx`):
-- Simple spinner or skeleton component
-- Accept optional `fullPage` prop for centered full-page loading
+Four shared components live in `src/components/`. All four now exist on disk (synced from the codebase). `<Layout />` is **wired into `App.tsx`** (App renders `<Layout />`, so the NavBar + `main` + `<Outlet />` shell wraps every route). `<ProtectedRoute />` is created but **not yet mounted** — it gets added to the router in Phase 3 (§3.6). Until then the auth routes remain public children of `<App />`.
 
-**`<ErrorMessage />`** (`src/components/ErrorMessage.tsx`) — already built in step 2.3 (pulled forward because LoginPage depends on it; do not duplicate):
-- Accept `error: unknown` prop
-- Use `parseApiError(error)` from `src/lib/error.ts` to extract `message` and `resolution`
-- Render in a styled div (`role="alert"`, red styling) with the error message
+**Files touched:**
 
-**`<NavBar />`** (`src/components/NavBar.tsx`):
-- If authenticated: show user email, "Books", "Logout" button
-- If not authenticated: show "Login", "Signup" links
-- Logout button calls `logout()` API → `useAuthStore.getState().logout()` → navigate to `/login`
+| File | Action |
+|---|---|
+| `src/components/ErrorMessage.tsx` | Already built (step 2.3) — do not duplicate |
+| `src/components/Loading.tsx` | Built — synced from disk |
+| `src/components/NavBar.tsx` | Built — synced from disk |
+| `src/components/ProtectedRoute.tsx` | Built — synced from disk |
+| `src/components/Layout.tsx` | Built — synced from disk |
+| `src/App.tsx` | Wiring — renders `<Layout />` (was `<Outlet />`) |
 
-**`<ProtectedRoute />`** (`src/components/ProtectedRoute.tsx`):
+#### 2.8.1 `<ErrorMessage />` — already exists, reference only
+
+Built in step 2.3 (pulled forward because LoginPage depends on it). Do **not** rebuild.
+
+- Props: `{ error: unknown }`
+- Uses `parseApiError(error)` from `src/lib/errors.ts` to extract `{ message, resolution? }`
+- Renders a `role="alert"` red-bordered div with the message (and resolution line if present). Live file confirmed at `src/components/ErrorMessage.tsx`.
+
+#### 2.8.2 `<Loading />` — spinner
+
+**File:** `src/components/Loading.tsx` (synced from disk)
+
+Design decisions:
+- A lightweight spinner (lucide `Loader2` with an `animate-spin` class) rather than a heavy skeleton grid.
+- Optional `fullPage?: boolean` (default `false`) and `size?: number` (default `48`).
+- When `fullPage` is truthy: renders a **fixed full-screen overlay** (`fixed inset-0 z-50`) centered over the page, and bumps the spinner size by `+16` (`size + 16`) so it reads larger in the empty viewport.
+- When `fullPage` is false/omitted: renders inline (`flex justify-center p-8`) at the given `size` (default `48`), for use inside already-padded containers.
+
+Exact disk implementation:
+
+```tsx
+import { Loader2 } from "lucide-react";
+export default function Loading({
+  fullPage = false,
+  size = 48,
+}: {
+  fullPage?: boolean;
+  size?: number;
+}) {
+  return (
+    <div
+      className={
+        fullPage
+          ? "fixed inset-0 z-50 flex items-center justify-center bg-gray-100"
+          : "flex justify-center p-8"
+      }
+      role="status"
+      aria-label="Loading"
+    >
+      <Loader2
+        size={fullPage ? size + 16 : size}
+        className="animate-spin text-purple-600"
+      />
+    </div>
+  );
+}
+```
+
+Usage (Phase 3/4): `<Loading />` for inline states; `<Loading fullPage />` for page-level loading (see the spec table at line 2386).
+
+#### 2.8.3 `<NavBar />` — top nav, conditional on auth
+
+**File:** `src/components/NavBar.tsx` (synced from disk)
+
+Design decisions:
+- Read auth via `useAuth()` (`src/features/auth/useAuth.ts`) — reactive subscription to the Zustand store (`user`, `isAuthenticated`).
+- **Not authenticated:** "Login" + "Signup" links (clean relative paths, matching router).
+- **Authenticated:** show the user's full name (`user.first_name` + `user.last_name`), a "Books" link (points to `/books`; wired meaningfully in §3.7), and a "Logout" button.
+- **Logout handler** must: call the `logout()` API to hit `GET /auth/logout` (which adds the JTI to the Redis blocklist), then clear the Zustand store (`useAuthStore.getState().logout()`), then navigate to `/login`. Use `useNavigate` from react-router-dom.
+- Styling: `bg-purple-700` bar with white text, `flex justify-between items-center` — matches the purple accent used across auth pages.
+
+```tsx
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../features/auth/useAuth";
+import { useAuthStore } from "../features/auth/authStore";
+import { logout } from "../features/auth/api";
+
+export default function NavBar() {
+  const { user, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      useAuthStore.getState().logout();
+      navigate("/login");
+    }
+  };
+
+  return (
+    <nav className="flex items-center justify-between bg-purple-700 px-6 py-3 text-white">
+      <div className="text-lg font-semibold">
+        <Link to="/">Bookly</Link>
+      </div>
+
+      {isAuthenticated() ? (
+        <div className="flex items-center gap-4 text-sm">
+          <Link to="/books" className="hover:underline">
+            Books
+          </Link>
+          <span>{user?.first_name} {user?.last_name}</span>
+          <button
+            onClick={handleLogout}
+            className="rounded bg-purple-900 px-3 py-1 text-xs font-semibold hover:bg-purple-800"
+          >
+            Logout
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-4 text-sm">
+          <Link to="/login" className="hover:underline">
+            Login
+          </Link>
+          <Link to="/signup" className="hover:underline">
+            Signup
+          </Link>
+        </div>
+      )}
+    </nav>
+  );
+}
+```
+
+#### 2.8.4 `<ProtectedRoute />` — redirect if not authenticated
+
+**File:** `src/components/ProtectedRoute.tsx` (synced from disk)
+
+- Reads `isAuthenticated` from `useAuth()`.
+- If not authenticated, `<Navigate to="/login" replace />`; else renders `<Outlet />` so nested/child routes render inside the guard.
+- Same implementation as the original §2.8 sketch (no dependency on the now-deprecated plan paths).
+
 ```tsx
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../features/auth/useAuth";
 
 export default function ProtectedRoute() {
   const { isAuthenticated } = useAuth();
+
+  //   Either /login or Outlet
   if (!isAuthenticated()) return <Navigate to="/login" replace />;
   return <Outlet />;
 }
 ```
 
-**`<Layout />`** (`src/components/Layout.tsx`):
+#### 2.8.5 `<Layout />` — NavBar + routed content
+
+**File:** `src/components/Layout.tsx` (synced from disk)
+
+- Renders `<NavBar />` at top and `<main><Outlet /></main>` below.
+- In Phase 3, protected pages sit under `<ProtectedRoute />` inside a `<Layout />` route (see §2.9 note + §3.6).
+- The disk file also carries a trailing JSX-comment block explaining `<main>`/`<Outlet />` semantics — harmless, leave it in place.
+
 ```tsx
 import { Outlet } from "react-router-dom";
 import NavBar from "./NavBar";
 
 export default function Layout() {
   return (
-    <div>
+    <div className="min-h-svh bg-gray-100">
       <NavBar />
-      <main>
+      <main className="mx-auto max-w-5xl px-4 py-8">
         <Outlet />
       </main>
     </div>
@@ -1822,9 +1960,36 @@ export default function Layout() {
 }
 ```
 
+#### 2.8.6 Wiring — `Layout` mounted via `App.tsx`
+
+`App.tsx` now renders `<Layout />` (instead of the bare `<Outlet />`), so the `NavBar` + `main` + `<Outlet />` shell wraps **every** route in Phase 2:
+
+```tsx
+// src/App.tsx
+import Layout from "./components/Layout";
+
+export default function App() {
+  return <Layout />;
+}
+```
+
+Consequences:
+- `NavBar` renders on all routes and switches between Login/Signup (logged out) and full-name + Books + Logout (logged in).
+- `<Layout />` is **not** referenced in `router.tsx` — the router still lists each auth route as a public child of `<App />` (§2.9 matches disk).
+- `<ProtectedRoute />` is created but **not yet mounted**. Only Phase 3 §3.6 nests the protected books pages under `ProtectedRoute` (inside `Layout`), and §3.7 finalizes the `NavBar` "Books" link target.
+
+#### 2.8.7 Verification
+
+1. `cd bookly-frontend && npx tsc --noEmit` — clean.
+2. `npm run lint` — clean.
+3. Visual smoke test (backend `fastapi dev src/` on :8000, frontend `npm run dev` on :5173): now that `Layout`/`NavBar` render on every route —
+   - Logged out: purple NavBar shows "Bookly" + Login + Signup links on `/login`, `/signup`, `/password-reset-request`.
+   - Logged in: NavBar shows the user's full name + Books + Logout; clicking Logout returns to `/login` and clears `bookly-auth`.
+
+
 ### 2.9 Update `router.tsx` with auth routes
 
-Live snapshot (matches `src/router.tsx` at end of Phase 2). All routes are public children of `<App />`; `Layout`/`ProtectedRoute` wrapping is deferred to Phase 3.
+Live snapshot (matches `src/router.tsx` at end of Phase 2). All routes are public children of `<App />`; `App` renders `<Layout />` (see §2.8.6). Only `<ProtectedRoute />` wrapping of the books pages is deferred to Phase 3.
 
 ```tsx
 import { createBrowserRouter } from "react-router-dom";
@@ -1858,7 +2023,7 @@ Route-path rationale (DECIDED — keep current, not the cleaner `/forgot-passwor
 - `verify/:token` and `password-reset-confirm/:token` use the **absolute `…/api/v1/…` paths** so links generated in backend emails land directly on the correct page (no client-side redirect needed).
 - `password-reset-request` is a frontend-only navigation path (reached via the "Forgot password?" link), so it uses the clean relative path.
 
-Phase 3 (Books) will introduce `Layout` + `ProtectedRoute` wrappers around these and move the protected pages inside them.
+Phase 3 (Books) will mount `<ProtectedRoute />` around the books pages (inside the `Layout` shell already wired in §2.8.6) and add them to this router.
 
 ### 2.10 Manual smoke test for auth flow
 
