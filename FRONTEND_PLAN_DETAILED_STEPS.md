@@ -41,8 +41,18 @@
     - [2.5.3 Full implementation (`src/features/auth/VerifyEmailPage.tsx`)](#253-full-implementation-srcfeaturesauthverifyemailpagetsx)
     - [2.5.4 Router update (`src/router.tsx`)](#254-router-update-srcroutertsx)
     - [2.5.5 Verification](#255-verification)
-  - [2.6 Build `<ForgotPasswordPage />`](#26-build-forgotpasswordpage-)
-  - [2.7 Build `<ResetPasswordPage />`](#27-build-resetpasswordpage-)
+  - [2.6 Build `<PasswordResetRequestPage />` — DETAILED SPEC](#26-build-passwordresetrequestpage---detailed-spec)
+    - [2.6.1 Backend contract (from `src/auth/routes.py:209-248`)](#261-backend-contract-from-srcauthroutespy209-248)
+    - [2.6.2 Design decisions](#262-design-decisions)
+    - [2.6.3 Full implementation (`src/features/auth/PasswordResetRequestPage.tsx`)](#263-full-implementation-srcfeaturesauthpasswordresetrequestpagetsx)
+    - [2.6.4 Router registration (`src/router.tsx`)](#264-router-registration-srcroutertsx)
+    - [2.6.5 Verification](#265-verification)
+  - [2.7 Build `<ResetAccountPassword />` — DETAILED SPEC](#27-build-resetaccountpassword---detailed-spec)
+    - [2.7.1 Backend contract (from `src/auth/routes.py:251-288`, `src/auth/schemas.py:88-94`)](#271-backend-contract-from-srcauthroutespy251-288-srcauthschemaspy88-94)
+    - [2.7.2 Design decisions](#272-design-decisions)
+    - [2.7.3 Full implementation (`src/features/auth/ResetAccountPassword.tsx`)](#273-full-implementation-srcfeaturesauthresetaccountpasswordtsx)
+    - [2.7.4 Router registration (`src/router.tsx`)](#274-router-registration-srcroutertsx)
+    - [2.7.5 Verification](#275-verification)
   - [2.8 Build shared components](#28-build-shared-components)
   - [2.9 Update `router.tsx` with auth routes](#29-update-routertsx-with-auth-routes)
   - [2.10 Manual smoke test for auth flow](#210-manual-smoke-test-for-auth-flow)
@@ -157,8 +167,8 @@ src/
       LoginPage.tsx
       SignupPage.tsx
       VerifyEmailPage.tsx
-      ForgotPasswordPage.tsx
-      ResetPasswordPage.tsx
+      PasswordResetRequestPage.tsx   # Forgot-password (single email field)
+      ResetAccountPassword.tsx       # Reset-password (two fields + token)
       api.ts                # Auth-specific axios calls
       queries.ts            # useCurrentUser query
     books/
@@ -774,8 +784,9 @@ Key decisions:
   4. `onSuccess:` → `navigate("/", { replace: true })`
 - Controlled inputs + HTML5 validation (`type="email"`, `required`) — no form library needed
 - UX polish: show/hide password toggle, submit disabled + relabeled while pending, `<ErrorMessage />` banner above form
-- Links to `/signup` and `/forgot-password` (routes arrive in later steps — dead links acceptable mid-phase)
+- Links to `/signup` and `/password-reset-request` (the forgot-password route — see 2.6)
 - Accessibility: `htmlFor`/`id` pairs, `aria-label` on toggle, `aria-busy` on submit
+- `mutationFn` param typed as `UserLogin` (not an inline anonymous object) — the native request-body type from `types/users.ts`
 
 ```tsx
 import { useState } from "react";
@@ -876,7 +887,7 @@ export default function LoginPage() {
         </form>
 
         <div className="mt-4 flex justify-between text-sm">
-          <Link to="/forgot-password" className="text-purple-600 hover:underline">
+          <Link to="/password-reset-request" className="text-purple-600 hover:underline">
             Forgot password?
           </Link>
           <span className="text-gray-600">
@@ -929,7 +940,7 @@ Public route — stays outside any future `<ProtectedRoute />` wrapper.
 | `src/features/auth/SignupPage.tsx` | Create |
 | `src/router.tsx` | Modify — register public `/signup` route |
 
-Out of scope: LoginPage's `/forget-password` → `/forgot-password` link typo (handled separately).
+Note: LoginPage's "Forgot password?" link now points to `/password-reset-request` (the §2.6 route) — see §2.3.2.
 
 #### 2.4.1 Backend contract (verified against `src/auth/schemas.py`)
 
@@ -1389,24 +1400,382 @@ import VerifyEmailPage from "./features/auth/VerifyEmailPage";
    - After signup, copy the real token from the email Celery log and navigate to `/verify/{real-token}` → success card: "Email verified!" + "Log in" link
    - Loading spinner visible during the network request (brief, ~200ms)
 
-### 2.6 Build `<ForgotPasswordPage />`
+### 2.6 Build `<PasswordResetRequestPage />` — DETAILED SPEC
 
-**File:** `src/features/auth/ForgotPasswordPage.tsx`
+**File:** `src/features/auth/PasswordResetRequestPage.tsx`
 
-- Form: single email field
-- On submit: `requestPasswordReset({ email })`
-- Always show the same success message regardless of whether the email exists (backend does this intentionally for security — see `routes.py:214`)
+> The earlier planned `ForgotPasswordPage.tsx` was consolidated into `PasswordResetRequestPage.tsx` — this is the canonical forgot-password page (single email field). No duplicate file exists.
 
-### 2.7 Build `<ResetPasswordPage />`
+**Files touched:**
 
-**File:** `src/features/auth/ResetPasswordPage.tsx`
+| File | Action |
+|---|---|
+| `src/features/auth/PasswordResetRequestPage.tsx` | Create (canonical forgot-password page) |
+| `src/router.tsx` | Register `password-reset-request` route |
 
-- Read `token` from URL params
-- Form: `new_password`, `confirm_new_password`
-- Client-side validation: passwords match, length >= 6
-- On submit: `resetPassword(token, { new_password, confirm_new_password })`
-- On success: navigate to `/login`
-- On error: 401 invalid token, 404 user not found, 500 general error
+#### 2.6.1 Backend contract (from `src/auth/routes.py:209-248`)
+
+`POST /auth/password-reset-request` with body `PasswordResetRequest { email }`.
+
+| Response | Status | Shape |
+|---|---|---|
+| Always (matched or unmatched email) | 200 | `{ message: "If an account with that email exists, a password reset link has been sent." }` |
+
+- The backend intentionally returns the **same 200 message regardless of whether the email exists** — prevents email enumeration. Verified even for non-existent emails.
+- Rate limit: **3/hour per IP** (`@limiter.limit("3/hour")` in `routes.py:212`).
+- If matched, a Celery task emails a reset link. The link expires in 5 minutes (via `URLSafeTimedSerializer` `max_age=300`).
+
+#### 2.6.2 Design decisions
+
+- **`useMutation`** — fires on submit only, no auth needed.
+- **`mutationFn` is `async` and returns `data`** via `const { data } = await requestPasswordReset(...)`. This unwraps the Axios envelope so the component reads clean `mutation.data?.message` (not `mutation.data?.data.message`). Appropriate here because the component *does* read the response message on success — matches the standard we apply consistently to the auth `useMutation` pages.
+- **Success panel via early return** — when `mutation.isSuccess`, swap the form for a "Link sent!" panel with a "Back to login" link.
+- **Security-aware UX** — because the backend always returns 200, the panel shows regardless of email existence; the "check your inbox (and spam)" nudge is honest and consistent.
+
+#### 2.6.3 Full implementation (`src/features/auth/PasswordResetRequestPage.tsx`)
+
+```tsx
+import { useMutation } from "@tanstack/react-query";
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import type { PasswordResetRequest } from "../../types/users";
+import { requestPasswordReset } from "./api";
+import ErrorMessage from "../../components/ErrorMessage";
+import { CheckCircle2 } from "lucide-react";
+
+export default function PasswordResetRequestPage() {
+  const [email, setEmail] = useState("");
+
+  // define the mutation
+  const mutation = useMutation({
+    mutationFn: async ({ email }: PasswordResetRequest) => {
+      const { data } = await requestPasswordReset({ email });
+      return data;
+    },
+  });
+
+  // --- After email send ---
+  if (mutation.isSuccess) {
+    return (
+      <div className="flex min-h-svh items-center justify-center bg-gray-100 px-4">
+        <div className="w-full max-w-md rounded-lg bg-white p-8 text-center shadow-md">
+          <CheckCircle2 size={48} className="mx-auto text-green-600" />
+          <h1 className="mb-2 mt-4 text-2xl font-semibold text-gray-900">
+            Link sent!
+          </h1>
+          <p className="text-sm text-gray-600">
+            {mutation.data?.message}
+            <br />
+            Please check your inbox (and spam folder).
+          </p>
+          <Link
+            to="/login"
+            className="mt-6 inline-block rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700"
+          >
+            Back to login
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-svh items-center justify-center bg-gray-100 px-4">
+      <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
+        {mutation.isError && (
+          <div className="mb-4">
+            <ErrorMessage error={mutation.error} />
+          </div>
+        )}
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            mutation.mutate({ email: email.trim() });
+          }}
+          className="space-y-4"
+        >
+          <div className="grid gap-4">
+            <div>
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                required
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={mutation.isPending}
+              aria-busy={mutation.isPending}
+              className="w-full rounded-md bg-purple-600 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {mutation.isPending ? "Sending..." : "Sent Password Reset Link"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+```
+
+#### 2.6.4 Router registration (`src/router.tsx`)
+
+Public route (no ProtectedRoute wrapper):
+
+```tsx
+import PasswordResetRequestPage from "./features/auth/PasswordResetRequestPage";
+
+{ path: "password-reset-request", element: <PasswordResetRequestPage /> },
+```
+
+#### 2.6.5 Verification
+
+1. `cd bookly-frontend && npx tsc --noEmit` — clean
+2. Smoke test (backend `fastapi dev src/` on :8000, frontend `npm run dev` on :5173):
+   - Navigate to `/password-reset-request` → single-email form renders, centered card
+   - Submit an existing email → "Link sent!" panel with success message + "Back to login"
+   - Submit a non-existent email → **same** "Link sent!" panel (backend returns 200 either way — no enumeration leak)
+   - Submit twice fast → button disabled, label "Sending..." while in flight
+
+### 2.7 Build `<ResetAccountPassword />` — DETAILED SPEC
+
+**File:** `src/features/auth/ResetAccountPassword.tsx`
+
+**Files touched:**
+
+| File | Action |
+|---|---|
+| `src/features/auth/ResetAccountPassword.tsx` | Create |
+| `src/router.tsx` | Register `password-reset-confirm/:token` route |
+
+#### 2.7.1 Backend contract (from `src/auth/routes.py:251-288`, `src/auth/schemas.py:88-94`)
+
+`POST /auth/password-reset-confirm/{token}` with body `PasswordResetConfirm`.
+
+| Field | Type / constraint |
+|---|---|
+| `new_password` | `PasswordStr` — string, `min_length=6` |
+| `confirm_new_password` | `PasswordStr` — string, `min_length=6` |
+
+- The **backend schema enforces a match** via a model validator (`schemas.py:94`) returning 422 on mismatch.
+- Success → `200 { message: "Password reset successfully" }`.
+- Errors: invalid/expired token → 400 `{ detail: ... }` (raw `HTTPException` from `decode_url_safe_token`); user not found → 404; generic → 500.
+
+#### 2.7.2 Design decisions
+
+- **`const { token } = useParams<{ token: string }>()`** — reads the token from the URL, same rationale as VerifyEmailPage (§2.5). No `enabled: !!token` guard needed here because this is a `useMutation` (fires only on submit, not on mount).
+- **`mutationFn` is `async` and returns `data`** — clean `mutation.data?.message` on success (single unwrap), matching the auth `useMutation` convention.
+- **Client-side password-match check** — redundant with the backend 422 validator, but gives immediate inline feedback and avoids a wasted round-trip. Keep it (consistent with SignupPage).
+- **`minLength={6}` + `required`** mirror the `PasswordStr` backend constraint so opaque 422s can't occur from the UI.
+- **`autoComplete="new-password"`** on both fields — the correct HTML autocomplete token (hyphenated) so password managers autofill correctly.
+- **Success panel via early return** — "Complete!" + `mutation.data?.message` + "Back to login" link.
+- **Show/hide password toggle** on the new-password field only (same `Eye`/`EyeOff` pattern as LoginPage/SignupPage).
+
+#### 2.7.3 Full implementation (`src/features/auth/ResetAccountPassword.tsx`)
+
+```tsx
+import { useMutation } from "@tanstack/react-query";
+import { Link, useParams } from "react-router-dom";
+import { resetPassword } from "./api";
+import { CheckCircle2, Eye, EyeOff } from "lucide-react";
+import ErrorMessage from "../../components/ErrorMessage";
+import { useState, type ChangeEvent } from "react";
+import type { PasswordResetConfirm } from "../../types/users";
+
+const initialForm: PasswordResetConfirm = {
+  new_password: "",
+  confirm_new_password: "",
+};
+
+export default function ResetAccountPassword() {
+  const { token } = useParams<{ token: string }>();
+  const [form, setForm] = useState(initialForm);
+  const [showPassword, setShowPassword] = useState(false);
+  const [passwordMisMatchError, setPasswordMisMatchError] = useState<
+    string | null
+  >(null);
+
+  // define the mutation
+  const mutation = useMutation({
+    mutationFn: async (passwordResetConfirm: PasswordResetConfirm) => {
+      const { data } = await resetPassword(token!, passwordResetConfirm);
+      return data;
+    },
+  });
+
+  function update(field: keyof typeof initialForm) {
+    return function (e: ChangeEvent<HTMLInputElement>) {
+      setForm((f) => ({ ...f, [field]: e.target.value }));
+    };
+  }
+
+  // --- Success panel ---
+  if (mutation.isSuccess) {
+    return (
+      <div className="flex min-h-svh items-center justify-center bg-gray-100 px-4">
+        <div className="w-full max-w-md rounded-lg bg-white p-8 text-center shadow-md">
+          <CheckCircle2 size={48} className="mx-auto text-green-600" />
+          <h1 className="mb-2 mt-4 text-2xl font-semibold text-gray-900">
+            Complete!
+          </h1>
+          <p className="text-sm text-gray-600">
+            {mutation.data?.message}
+          </p>
+          <Link
+            to="/login"
+            className="mt-6 inline-block rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700"
+          >
+            Back to login
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-svh items-center justify-center bg-gray-100 px-4">
+      <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
+        <h1 className="mb-6 text-2xl font-semibold text-gray-900">
+          Enter new password
+        </h1>
+
+        {mutation.isError && (
+          <div className="mb-4">
+            <ErrorMessage error={mutation.error} />
+          </div>
+        )}
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+
+            if (form.new_password != form.confirm_new_password) {
+              setPasswordMisMatchError("Passwords did not match");
+              return;
+            }
+
+            setPasswordMisMatchError(null);
+
+            const data: PasswordResetConfirm = {
+              new_password: form.new_password,
+              confirm_new_password: form.confirm_new_password,
+            };
+
+            mutation.mutate(data);
+          }}
+          className="space-y-4"
+        >
+          <div className="grid gap-4">
+            <div>
+              <label
+                htmlFor="new_password"
+                className="block text-sm font-medium text-gray-700"
+              >
+                New Password
+              </label>
+              <div className="relative mt-1">
+                <input
+                  id="new_password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                  value={form.new_password}
+                  onChange={update("new_password")}
+                  placeholder="At least 6 characters"
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute inset-y-0 right-2 text-xs font-medium text-purple-600 hover:text-purple-800"
+                >
+                  {form.new_password && (
+                    <span>
+                      {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="confirm_new_password"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Confirm New Password
+              </label>
+              <input
+                id="confirm_new_password"
+                type={showPassword ? "text" : "password"}
+                required
+                minLength={6}
+                autoComplete="new-password"
+                value={form.confirm_new_password}
+                aria-invalid={!!passwordMisMatchError}
+                onChange={(e) => {
+                  update("confirm_new_password")(e);
+                  setPasswordMisMatchError(null); // clear error as soon as user retypes
+                }}
+                placeholder="Repeat password"
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+              />
+              {passwordMisMatchError && (
+                <p className="mt-1 text-xs text-red-600">
+                  {passwordMisMatchError}
+                </p>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={mutation.isPending}
+              aria-busy={mutation.isPending}
+              className="w-full rounded-md bg-purple-600 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Change password
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+```
+
+#### 2.7.4 Router registration (`src/router.tsx`)
+
+Public route — uses the **absolute path matching the backend email link format** so clicks from the emailed link land directly:
+
+```tsx
+import ResetAccountPassword from "./features/auth/ResetAccountPassword";
+
+{
+  path: "/api/v1/auth/password-reset-confirm/:token",
+  element: <ResetAccountPassword />,
+},
+```
+
+#### 2.7.5 Verification
+
+1. `cd bookly-frontend && npx tsc --noEmit` — clean
+2. Smoke test:
+   - Password mismatch → inline red "Passwords did not match" under the confirm field, **zero network requests** fired
+   - Valid submit (real token copied from email Celery log, navigate to `/api/v1/auth/password-reset-confirm/{token}`) → "Complete!" panel + "Back to login"
+   - Navigate with a bogus token → error banner (400/404/500 from backend)
 
 ### 2.8 Build shared components
 
@@ -1455,35 +1824,41 @@ export default function Layout() {
 
 ### 2.9 Update `router.tsx` with auth routes
 
+Live snapshot (matches `src/router.tsx` at end of Phase 2). All routes are public children of `<App />`; `Layout`/`ProtectedRoute` wrapping is deferred to Phase 3.
+
 ```tsx
 import { createBrowserRouter } from "react-router-dom";
 import App from "./App";
-import Layout from "./components/Layout";
-import ProtectedRoute from "./components/ProtectedRoute";
 import LoginPage from "./features/auth/LoginPage";
 import SignupPage from "./features/auth/SignupPage";
 import VerifyEmailPage from "./features/auth/VerifyEmailPage";
-import ForgotPasswordPage from "./features/auth/ForgotPasswordPage";
-import ResetPasswordPage from "./features/auth/ResetPasswordPage";
+import PasswordResetRequestPage from "./features/auth/PasswordResetRequestPage";
+import ResetAccountPassword from "./features/auth/ResetAccountPassword";
 
 export const router = createBrowserRouter([
   {
     path: "/",
     element: <App />,
     children: [
-      { element: <Layout />, children: [
-        { path: "login", element: <LoginPage /> },
-        { path: "signup", element: <SignupPage /> },
-        { path: "verify/:token", element: <VerifyEmailPage /> },
-        { path: "forgot-password", element: <ForgotPasswordPage /> },
-        { path: "reset-password/:token", element: <ResetPasswordPage /> },
-        // Protected routes added in Phase 3
-        { element: <ProtectedRoute />, children: [] },
-      ]},
+      // Routes added in Phase 2
+      { path: "login", element: <LoginPage /> },
+      { path: "signup", element: <SignupPage /> },
+      { path: "/api/v1/auth/verify/:token", element: <VerifyEmailPage /> },
+      { path: "password-reset-request", element: <PasswordResetRequestPage /> },
+      {
+        path: "/api/v1/auth/password-reset-confirm/:token",
+        element: <ResetAccountPassword />,
+      },
     ],
   },
 ]);
 ```
+
+Route-path rationale (DECIDED — keep current, not the cleaner `/forgot-password`/`/reset-password/:token` plan):
+- `verify/:token` and `password-reset-confirm/:token` use the **absolute `…/api/v1/…` paths** so links generated in backend emails land directly on the correct page (no client-side redirect needed).
+- `password-reset-request` is a frontend-only navigation path (reached via the "Forgot password?" link), so it uses the clean relative path.
+
+Phase 3 (Books) will introduce `Layout` + `ProtectedRoute` wrappers around these and move the protected pages inside them.
 
 ### 2.10 Manual smoke test for auth flow
 
@@ -1494,6 +1869,8 @@ export const router = createBrowserRouter([
 5. Login → confirm `localStorage` has `bookly-auth` key with tokens + user
 6. Refresh page → confirm tokens persist (Zustand `persist` middleware)
 7. Navigate to `/` → confirm `<ProtectedRoute>` shows (or redirects to login if logged out)
+8. `/password-reset-request` → submit email → "Link sent!" panel regardless of email existence (see 2.6)
+9. Paste a reset link (from Celery log) into the browser → `/api/v1/auth/password-reset-confirm/{token}` → reset form (see 2.7)
 
 ---
 
