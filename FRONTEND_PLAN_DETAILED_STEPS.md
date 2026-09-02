@@ -552,6 +552,7 @@ export function parseApiError(error: unknown): ApiErrorPayload {
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { UserOut } from "../../types/users";
+import { queryClient } from "../../lib/queryClient";
 
 interface AuthState {
   accessToken: string | null;
@@ -578,8 +579,12 @@ export const useAuthStore = create<AuthState>()(
 
       setUser: (user) => set({ user }),
 
-      logout: () =>
-        set({ accessToken: null, refreshToken: null, user: null }),
+      logout: () => {
+        queryClient.removeQueries({ queryKey: ["currentUser"] });
+        // drop every cached ["currentUser", ...] slot on logout — prevents
+        // stale-cache-after-login-of-another-user (see §2.2 cache-invalidation note)
+        set({ accessToken: null, refreshToken: null, user: null });
+      },
 
       isAuthenticated: () => get().accessToken !== null,
     }),
@@ -678,7 +683,7 @@ Auth Pages: Login, Signup, Verify Email, Forgot/Reset Password, NavBar, Protecte
 
 ### 2.1 Build auth API helper (`src/features/auth/api.ts`)
 
-Each function maps 1:1 to a backend route.
+Each function maps 1:1 to a backend route. All paths are rooted at a single `const PREFIX = "auth"` and interpolated into each template literal, so the version string lives in one place per feature.
 
 | Function | Backend route | Request body | Response |
 |---|---|---|---|
@@ -696,54 +701,66 @@ import type {
   UserCreateResponse,
   UserCreate,
   LoginResponse,
-  RefreshResponse,
   UserDetailOut,
   PasswordResetRequest,
   PasswordResetConfirm,
   UserLogin,
 } from "../../types/users";
 
+const PREFIX = "auth";
+
 // Auth
 export const signup = (data: UserCreate) =>
-  apiClient.post<UserCreateResponse>("/auth/signup", data);
+  apiClient.post<UserCreateResponse>(`/${PREFIX}/signup`, data);
 
 export const login = (data: UserLogin) =>
-  apiClient.post<LoginResponse>("/auth/login", data);
+  apiClient.post<LoginResponse>(`/${PREFIX}/login`, data);
 
-export const logout = () => apiClient.get("/auth/logout");
+export const logout = () => apiClient.get(`/${PREFIX}/logout`);
 
 export const verifyEmail = (token: string) =>
-  apiClient.get(`/auth/verify/${token}`);
+  apiClient.get(`/${PREFIX}/verify/${token}`);
 
 export const requestPasswordReset = (data: PasswordResetRequest) =>
-  apiClient.post("/auth/password-reset-request", data);
+  apiClient.post(`/${PREFIX}/password-reset-request`, data);
 
 export const resetPassword = (token: string, data: PasswordResetConfirm) =>
-  apiClient.post(`/auth/password-reset-confirm/${token}`, data);
+  apiClient.post(`/${PREFIX}/password-reset-confirm/${token}`, data);
 
-export const getCurrentUser = () => apiClient.get<UserDetailOut>("/auth/me");
+export const getCurrentUser = () =>
+  apiClient.get<UserDetailOut>(`/${PREFIX}/me`);
 ```
+- `PREFIX = "auth"` has **no leading or trailing slash**; each call site adds its own slashes (`` `/${PREFIX}/signup` → `/auth/signup` ``). This is the shared pattern across every feature API module (see §3.1 for `books`).
 
 ### 2.2 Create `useCurrentUser` query (`src/features/auth/queries.ts`)
 
+The query is **keyed on the access token** so each auth session has its own cache slot — this is what prevents "stale cache after logging in as a different user" (see cache-invalidation note below).
+
 ```ts
 import { useQuery } from "@tanstack/react-query";
-import { getCurrentUser } from "./api";
 import { useAuthStore } from "./authStore";
+import { getCurrentUser } from "./api";
 
 export function useCurrentUser() {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const accessToken = useAuthStore((s) => s.accessToken); // primitive — identity changes on login/logout
   return useQuery({
-    queryKey: ["currentUser"],
+    queryKey: ["currentUser", accessToken], // token-scoped: identity changes on login/logout
     queryFn: async () => {
       const { data } = await getCurrentUser();
-      return data;  // UserDetailOut
+      return data; // UserDetailOut
     },
-    enabled: isAuthenticated(),
+    enabled: !!accessToken,
     staleTime: 5 * 60 * 1000,
   });
 }
 ```
+
+Design notes:
+- `queryKey: ["currentUser", accessToken]` — the token is part of the cache identity. `["currentUser"]` is a **prefix**: `invalidateQueries({ queryKey: ["currentUser"] })` matches every token-scoped variant without needing to know the token. Logging in as a different user changes `accessToken`, so it becomes a **different cache slot** — no stale `UserDetailOut` from the previous user is served.
+- `enabled: !!accessToken` — the query only runs when there is a logged-in token; while `false` it stays idle (no request, no error). Other components calling this hook share the one cached result (same key) and get instant cache hits on remount.
+- `staleTime: 5 min` — overrides the global 1-min default: after fetching `/auth/me` the cache is fresh for 5 minutes; remounts within that window serve cache with **no** network call. `refetchOnWindowFocus: false` is set globally, so no refetch on focus either.
+
+**Cache invalidation on logout** (ties into §1.10): `authStore.logout()` calls `queryClient.removeQueries({ queryKey: ["currentUser"] })`, which prefix-matches and **drops** every cached `["currentUser", ...]` entry. `removeQueries` (not `invalidateQueries`) is intentional — on logout we want the data *gone*, not refetched for the now-logged-out token.
 
 ### 2.3 Build `<LoginPage />` — DETAILED SPEC (approved, ready to implement)
 
@@ -2082,20 +2099,23 @@ import type {
   BookUpdate,
 } from "../../types/books";
 
-export const getBooks = () => apiClient.get<BookOut[]>("/books/");
+const PREFIX = "books";
+
+export const getBooks = () => apiClient.get<BookOut[]>(`/${PREFIX}/`);
 
 export const getBook = (uid: string) =>
-  apiClient.get<BookDetailOut>(`/books/${uid}`);
+  apiClient.get<BookDetailOut>(`/${PREFIX}/${uid}`);
 
 export const createBook = (data: BookCreate) =>
-  apiClient.post<BookOut>("/books/", data);
+  apiClient.post<BookOut>(`/${PREFIX}/`, data);
 
 export const updateBook = (uid: string, data: BookUpdate) =>
-  apiClient.patch<BookOut>(`/books/${uid}`, data);
+  apiClient.patch<BookOut>(`/${PREFIX}/${uid}`, data);
 
 export const deleteBook = (uid: string) =>
-  apiClient.delete(`/books/${uid}`); // returns 204, no body
+  apiClient.delete(`/${PREFIX}/${uid}`); // returns 204, no body
 ```
+- Same `PREFIX` convention as §2.1 (`const PREFIX = "books"`, no slashes; call sites add them). Note `getBooks`/`createBook` use `` `/${PREFIX}/` `` → `/books/` (trailing slash — the backend's list/create routes), while detail/update/delete use `` `/${PREFIX}/${uid}` `` → `/books/{uid}`. The list return type is `BookOut[]` (a real array, not a tuple).
 
 **Error shapes from `errors.py`:**
 - `BookNotFound`: 404 `{ message: "Book not found", error_code: "book_not_found" }`
