@@ -64,13 +64,16 @@
   - [2.9 Update `router.tsx` with auth routes](#29-update-routertsx-with-auth-routes)
   - [2.10 Manual smoke test for auth flow](#210-manual-smoke-test-for-auth-flow)
 - [Phase 3 — Books CRUD](#phase-3--books-crud)
-  - [3.1 Build books API helper (`src/features/books/api.ts`)](#31-build-books-api-helper-srcfeaturesbooksapits)
-  - [3.2 Create books queries/mutations (`src/features/books/queries.ts`)](#32-create-books-queriesmutations-srcfeaturesbooksqueriests)
-  - [3.3 Build `<BooksListPage />`](#33-build-bookslistpage-)
-  - [3.4 Build `<BookForm />`](#34-build-bookform-)
-  - [3.5 Build `<BookDetailPage />`](#35-build-bookdetailpage-)
-  - [3.6 Build books routes in `router.tsx`](#36-build-books-routes-in-routertsx)
-  - [3.7 Update NavBar to include Books link](#37-update-navbar-to-include-books-link)
+  - [3.1 Build books API helper (`src/features/books/api.ts`) — DETAILED SPEC](#31-build-books-api-helper-srcfeaturesbooksapits--detailed-spec)
+  - [3.2 Create books queries/mutations (`src/features/books/queries.ts`) — DETAILED SPEC](#32-create-books-queriesmutations-srcfeaturesbooksqueriests--detailed-spec)
+  - [3.3 Build `<BooksListPage />` — DETAILED SPEC](#33-build-bookslistpage---detailed-spec)
+  - [3.4 Build `<BookForm />` — DETAILED SPEC](#34-build-bookform---detailed-spec)
+  - [3.5 Build `<ConfirmDialog />` + `<BookDetailPage />` — DETAILED SPEC](#35-build-confirmdialog---bookdetailpage---detailed-spec)
+    - [3.5.1 `<ConfirmDialog />` (reusable shared component)](#351-confirmdialog--reusable-shared-component)
+    - [3.5.2 `<BookDetailPage />`](#352-bookdetailpage-)
+  - [3.6 Restructure `router.tsx` — mount `<ProtectedRoute />` + books routes — DETAILED SPEC](#36-restructure-routertsx--mount-protectedroute---books-routes--detailed-spec)
+  - [3.7 NavBar "Books" link — reconciliation note](#37-navbar-books-link--reconciliation-note)
+  - [3.8 Verification — DETAILED SPEC](#38-verification--detailed-spec)
 - [Phase 4 — Reviews + Tags](#phase-4--reviews--tags)
   - [4.1 Build reviews API helper (`src/features/reviews/api.ts`)](#41-build-reviews-api-helper-srcfeaturesreviewsapits)
   - [4.2 Create reviews queries/mutations (`src/features/reviews/queries.ts`)](#42-create-reviews-queriesmutations-srcfeaturesreviewsqueriests)
@@ -200,6 +203,7 @@ src/
     ProtectedRoute.tsx      # Redirects to /login if not authenticated
     Loading.tsx             # Spinner (Loader2), optional fullPage overlay
     ErrorMessage.tsx        # Renders ApiError.message
+    ConfirmDialog.tsx       # Reusable inline confirm modal (Phase 3 §3.5)
   router.tsx                # createBrowserRouter config
   test/
     setup.ts                # Vitest setup — import MSW server
@@ -1788,7 +1792,7 @@ import ResetAccountPassword from "./features/auth/ResetAccountPassword";
 
 ### 2.8 Build shared components — DETAILED SPEC
 
-Four shared components live in `src/components/`. All four now exist on disk (synced from the codebase). `<Layout />` is **wired into `App.tsx`** (App renders `<Layout />`, so the NavBar + `main` + `<Outlet />` shell wraps every route). `<ProtectedRoute />` is created but **not yet mounted** — it gets added to the router in Phase 3 (§3.6). Until then the auth routes remain public children of `<App />`.
+Four shared components live in `src/components/`. All four now exist on disk (synced from the codebase). `<Layout />` is **wired into `App.tsx`** (App renders `<Layout />`, so the NavBar + `main` + `<Outlet />` shell wraps every route). `<ProtectedRoute />` is created but **not yet mounted** — it gets added to the router in Phase 3 (§3.6). Until then the auth routes remain public children of `<App />`. A **fifth** shared component, `<ConfirmDialog />`, is added in Phase 3 §3.5 (reused there for book-delete and later in Phase 4 for review/tag confirmation).
 
 **Files touched:**
 
@@ -1800,6 +1804,7 @@ Four shared components live in `src/components/`. All four now exist on disk (sy
 | `src/components/ProtectedRoute.tsx` | Built — synced from disk |
 | `src/components/Layout.tsx` | Built — synced from disk |
 | `src/App.tsx` | Wiring — renders `<Layout />` (was `<Outlet />`) |
+| `src/components/ConfirmDialog.tsx` | Phase 3 — reused for delete confirmation (§3.5) |
 
 #### 2.8.1 `<ErrorMessage />` — already exists, reference only
 
@@ -1849,7 +1854,7 @@ export default function Loading({
 }
 ```
 
-Usage (Phase 3/4): `<Loading />` for inline states; `<Loading fullPage />` for page-level loading (see the spec table at line 2386).
+Usage (Phase 3/4): `<Loading />` for inline states; `<Loading fullPage />` for page-level loading (see the Phase 5 §5.1 load/empty-state table).
 
 #### 2.8.3 `<NavBar />` — top nav, conditional on auth
 
@@ -2043,15 +2048,30 @@ Phase 3 (Books) will mount `<ProtectedRoute />` around the books pages (inside t
 Books CRUD: typed API client, TanStack Query hooks with cache invalidation, BooksList, BookDetail, BookForm (shared create/edit)
 
 
-### 3.1 Build books API helper (`src/features/books/api.ts`)
+### 3.1 Build books API helper (`src/features/books/api.ts`) — DETAILED SPEC
 
-| Function | Backend route | Auth required | Request body | Response |
-|---|---|---|---|---|
-| `getBooks()` | `GET /books/` | Yes | — | `BookOut[]` |
-| `getBook(uid)` | `GET /books/{uid}` | Yes | — | `BookDetailOut` |
-| `createBook(data)` | `POST /books/` | Yes | `BookCreate` | `BookOut` |
-| `updateBook(uid, data)` | `PATCH /books/{uid}` | Yes | `BookUpdate` | `BookOut` |
-| `deleteBook(uid)` | `DELETE /books/{uid}` | Yes | — | 204 (empty) |
+**File:** `src/features/books/api.ts`
+
+**Files touched:**
+
+| File | Action |
+|---|---|
+| `src/features/books/api.ts` | Create |
+| `src/types/books.ts` | Already built (Phase 1) — `BookBase/BookCreate/BookUpdate/BookOut/BookDetailOut` |
+
+Backend contract (verified against `src/books/routes.py`):
+
+| Function | HTTP call | Auth | Success → returns |
+|---|---|---|---|
+| `getBooks()` | `GET /books/` | Yes | **200** → `BookOut[]` (newest first, nested `tags`) |
+| `getBook(uid)` | `GET /books/{uid}` | Yes | **200** → `BookDetailOut` (nested `reviews` + `tags`) |
+| `createBook(data)` | `POST /books/` | Yes | **201** → `BookOut` |
+| `updateBook(uid, data)` | `PATCH /books/{uid}` | Yes | **200** → `BookOut` |
+| `deleteBook(uid)` | `DELETE /books/{uid}` | Yes | **204** (empty body) |
+
+- Auth: any **verified** user (`RoleChecker(["admin","user"])`). No per-user ownership check on update/delete in this version.
+- `getBook` returns a `BookDetailOut` — nested `reviews` are rendered on the detail page (no standalone reviews list page for users).
+- `deleteBook` returns **204 with no body** — the mutation should not expect `data`.
 
 ```ts
 import apiClient from "../../lib/apiClient";
@@ -2074,15 +2094,27 @@ export const updateBook = (uid: string, data: BookUpdate) =>
   apiClient.patch<BookOut>(`/books/${uid}`, data);
 
 export const deleteBook = (uid: string) =>
-  apiClient.delete(`/books/${uid}`); // returns 204
+  apiClient.delete(`/books/${uid}`); // returns 204, no body
 ```
 
 **Error shapes from `errors.py`:**
 - `BookNotFound`: 404 `{ message: "Book not found", error_code: "book_not_found" }`
-- `NotAuthenticated`: 401 `{ message: "User is not authenticated", error_code: "not_authenticated" }`
-- `InvalidToken`: 401 `{ message: "Token is invalid Or expired", error_code: "invalid_token" }`
+- `NotAuthenticated` / `InvalidToken`: 401 (no / bad token)
+- `AccountNotVerified`: 403 `{ message: "Account Not verified", error_code: "account_not_verified" }`
+- SlowAPI 429 returns non-standard `{ "detail": ... }` (falls through `parseApiError` to a generic message)
 
-### 3.2 Create books queries/mutations (`src/features/books/queries.ts`)
+### 3.2 Create books queries/mutations (`src/features/books/queries.ts`) — DETAILED SPEC
+
+**File:** `src/features/books/queries.ts`
+
+Design decisions:
+- `bookKeys` centralizes query-key identity so all hooks (and any manual invalidation) stay in sync.
+- `useBooks` reads the list; `useBook(uid)` guards with `enabled: !!uid` (same pattern as `useCurrentUser`).
+- Mutation `onSuccess` invalidations:
+  - `useCreateBook` → invalidate `bookKeys.all` (list may have changed / sort order).
+  - `useUpdateBook(uid)` → invalidate `bookKeys.all` **and** `bookKeys.detail(uid)`.
+  - `useDeleteBook` → invalidate `bookKeys.all`.
+- `mutationFn` here returns the axios promise directly (nothing reads `data` at hook level; pages unwrap where needed).
 
 ```ts
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -2141,64 +2173,488 @@ export const useDeleteBook = () => {
 };
 ```
 
-### 3.3 Build `<BooksListPage />`
+### 3.3 Build `<BooksListPage />` — DETAILED SPEC
 
 **File:** `src/features/books/BooksListPage.tsx`
 
-- Use `useBooks()` query
-- While loading: show `<Loading />`
-- If error: show `<ErrorMessage />`
-- If empty: show "No books yet. Add one!" message
-- Render a grid/list of book cards, each linking to `/books/{uid}`
-- Include a "Create Book" button linking to `/books/new`
-- Book card shows: title, author, publisher, language, tag chips
+Design decisions:
+- `useBooks()` query; branch on `isLoading` → `<Loading />`, `isError` → `<ErrorMessage />`, empty list → empty-state CTA, else grid of cards.
+- Each card is a `<Link to={/books/${book.uid}}>` showing title, author, publisher, language, and tag chips (`book.tags.map`). Phase 4 replaces the inline chips with the shared `<TagChips />`.
+- A prominent "Create Book" button → `/books/new`.
+- Page shell: the `Layout` (NavBar) already wraps all routes via `App`, so this page only renders its content column.
 
-### 3.4 Build `<BookForm />`
+```tsx
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { Plus } from "lucide-react";
+import { useBooks } from "./queries";
+import Loading from "../../components/Loading";
+import ErrorMessage from "../../components/ErrorMessage";
+
+export default function BooksListPage() {
+  const { data: books, isLoading, isError, error } = useBooks();
+
+  if (isLoading) return <Loading />;
+  if (isError) return <ErrorMessage error={error} />;
+
+  return (
+    <div>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-gray-900">Books</h1>
+        <Link
+          to="/books/new"
+          className="inline-flex items-center gap-2 rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700"
+        >
+          <Plus size={16} /> Create Book
+        </Link>
+      </div>
+
+      {books && books.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-300 p-12 text-center">
+          <p className="text-gray-600">No books yet. Create your first book!</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {books?.map((book) => (
+            <Link
+              key={book.uid}
+              to={`/books/${book.uid}`}
+              className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:shadow-md"
+            >
+              <h2 className="mb-1 font-semibold text-gray-900">{book.title}</h2>
+              <p className="text-sm text-gray-600">by {book.author}</p>
+              <p className="mt-2 text-xs text-gray-500">
+                {book.publisher} · {book.language}
+              </p>
+              {book.tags.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {book.tags.map((tag) => (
+                    <span
+                      key={tag.uid}
+                      className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700"
+                    >
+                      {tag.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+### 3.4 Build `<BookForm />` — DETAILED SPEC
 
 **File:** `src/features/books/BookForm.tsx`
 
-- Accept optional `initialData?: BookUpdate` and `onSubmit` prop for reuse in create and edit modes
-- Fields: `title`, `author`, `publisher`, `page_count` (number), `language`, `published_date` (date string, default `"YYYY-MM-DD"`)
-- Client-side validation:
-  - All fields required (matching backend Pydantic `BookBase`)
-  - `page_count` must be a positive integer
-  - `published_date` format: `YYYY-MM-DD` (backend accepts raw string, not validated as `date` type)
-- On submit: call `useCreateBook().mutateAsync(data)` or `useUpdateBook(uid).mutateAsync(data)` depending on mode
+Design decisions:
+- A **single shared component** toggled by a `mode: "create" | "edit"` prop — no separate create/edit pages.
+- Props: `mode`, `bookUid?: string` (edit only), `initialData?: BookUpdate` (edit only — used to prefill the controlled state).
+- Controlled fields: `title`, `author`, `publisher`, `page_count` (number), `language`, `published_date` (`<input type="date">`).
+- Client validation (submission guard, matches backend `BookBase`): all required; `page_count` must be a positive integer.
+- Submit: create → `useCreateBook().mutateAsync(data)` then `navigate(/books/${created.uid})`; edit → `useUpdateBook(bookUid).mutateAsync(data)` then `navigate(/books/${bookUid})`.
+- React 19: use `SyntheticEvent<HTMLFormElement>` for the submit handler (not the deprecated `FormEvent`).
+- Backend note: `published_date` is sent as a raw `"YYYY-MM-DD"` string; `BookUpdate` makes every field optional; `BookCreate.published_date` defaults to `"YYYY-MM-DD"`.
 
-**Backend note:** The `BookCreate` schema has `published_date: str = "YYYY-MM-DD"` — it accepts a plain string, not a validated date. The `BookUpdate` schema makes all fields optional.
+```tsx
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, type ChangeEvent, type SyntheticEvent } from "react";
+import { useNavigate } from "react-router-dom";
+import { createBook, updateBook } from "./api";
+import { bookKeys } from "./queries";
+import ErrorMessage from "../../components/ErrorMessage";
+import type { BookCreate, BookUpdate } from "../../types/books";
 
-### 3.5 Build `<BookDetailPage />`
+export default function BookForm({
+  mode,
+  bookUid,
+  initialData,
+}: {
+  mode: "create" | "edit";
+  bookUid?: string;
+  initialData?: BookUpdate;
+}) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+
+  const [form, setForm] = useState({
+    title: initialData?.title ?? "",
+    author: initialData?.author ?? "",
+    publisher: initialData?.publisher ?? "",
+    page_count: initialData?.page_count?.toString() ?? "",
+    language: initialData?.language ?? "",
+    published_date: initialData?.published_date ?? "",
+  });
+
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: async () =>
+      mode === "create"
+        ? createBook(castCreate())
+        : updateBook(bookUid!, castUpdate()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: bookKeys.all });
+    },
+  });
+
+  function castCreate(): BookCreate {
+    return {
+      ...form,
+      page_count: Number(form.page_count),
+      published_date: form.published_date,
+    };
+  }
+
+  function castUpdate(): BookUpdate {
+    return {
+      ...(form.title ? { title: form.title } : {}),
+      ...(form.author ? { author: form.author } : {}),
+      ...(form.publisher ? { publisher: form.publisher } : {}),
+      ...(form.page_count ? { page_count: Number(form.page_count) } : {}),
+      ...(form.language ? { language: form.language } : {}),
+      ...(form.published_date ? { published_date: form.published_date } : {}),
+    };
+  }
+
+  function update(field: keyof typeof form) {
+    return (e: ChangeEvent<HTMLInputElement>) =>
+      setForm((f) => ({ ...f, [field]: e.target.value }));
+  }
+
+  async function handleSubmit(e: SyntheticEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const pageCount = Number(form.page_count);
+    if (!form.title || !form.author || !form.publisher || !form.language) {
+      setValidationError("All fields are required.");
+      return;
+    }
+    if (!Number.isInteger(pageCount) || pageCount <= 0) {
+      setValidationError("Page count must be a positive integer.");
+      return;
+    }
+    setValidationError(null);
+
+    // mutationFn closes over `form`; mutateAsync() (no args) resolves to the
+    // axios response, so we can grab the created uid for the redirect.
+    const res = await mutation.mutateAsync();
+    const uid = mode === "create" ? res.data.uid : bookUid!;
+    navigate(`/books/${uid}`);
+  }
+
+  return (
+    <div className="mx-auto max-w-lg rounded-lg bg-white p-6 shadow-md">
+      <h1 className="mb-4 text-xl font-semibold text-gray-900">
+        {mode === "create" ? "Create Book" : "Edit Book"}
+      </h1>
+
+      {mutation.isError && (
+        <div className="mb-4">
+          <ErrorMessage error={mutation.error} />
+        </div>
+      )}
+      {validationError && (
+        <div className="mb-4">
+          <ErrorMessage
+            error={{ message: validationError, error_code: "validation" }}
+          />
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {(
+          [
+            ["title", "Title"],
+            ["author", "Author"],
+            ["publisher", "Publisher"],
+            ["language", "Language"],
+          ] as const
+        ).map(([field, label]) => (
+          <div key={field}>
+            <label className="block text-sm font-medium text-gray-700">
+              {label}
+            </label>
+            <input
+              value={form[field]}
+              onChange={update(field)}
+              required
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+            />
+          </div>
+        ))}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700">
+            Page count
+          </label>
+          <input
+            type="number"
+            min={1}
+            value={form.page_count}
+            onChange={update("page_count")}
+            required
+            className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700">
+            Published date
+          </label>
+          <input
+            type="date"
+            value={form.published_date}
+            onChange={update("published_date")}
+            className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={mutation.isPending}
+          className="w-full rounded-md bg-purple-600 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {mutation.isPending
+            ? mode === "create"
+              ? "Creating..."
+              : "Saving..."
+            : mode === "create"
+              ? "Create Book"
+              : "Save Changes"}
+        </button>
+      </form>
+    </div>
+  );
+}
+```
+
+### 3.5 Build `<ConfirmDialog />` + `<BookDetailPage />` — DETAILED SPEC
+
+Phase 3 adds the **fifth shared component** `<ConfirmDialog />` (reused later in Phase 4 for review/tag deletes) and uses it on `BookDetailPage` for the delete action.
+
+#### 3.5.1 `<ConfirmDialog />` (reusable shared component)
+
+**File:** `src/components/ConfirmDialog.tsx`
+
+Props:
+- `open: boolean` — show/hide the modal.
+- `title: string` — heading.
+- `message?: string` — optional body text.
+- `confirmLabel?: string` — confirm button text (default `"Confirm"`).
+- `onCancel: () => void`, `onConfirm: () => void`.
+- Accessible: `role="dialog" aria-modal="true"`, fixed full-screen overlay, focus on the confirm button.
+
+```tsx
+import { useEffect, useRef } from "react";
+
+export default function ConfirmDialog({
+  open,
+  title,
+  message,
+  confirmLabel = "Confirm",
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  message?: string;
+  confirmLabel?: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const confirmRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (open) confirmRef.current?.focus();
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="w-full max-w-sm rounded-lg bg-white p-6 shadow-lg"
+      >
+        <h2 className="mb-2 text-lg font-semibold text-gray-900">{title}</h2>
+        {message && <p className="mb-4 text-sm text-gray-600">{message}</p>}
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onCancel}
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+          >
+            Cancel
+          </button>
+          <button
+            ref={confirmRef}
+            onClick={onConfirm}
+            className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+#### 3.5.2 `<BookDetailPage />`
 
 **File:** `src/features/books/BookDetailPage.tsx`
 
-- Read `uid` from `useParams()`
-- Use `useBook(uid)` query
-- Display: title, author, publisher, page_count, language, published_date
-- Render `<TagChips bookUid={uid} tags={book.tags} />` section
-- Render `<ReviewList reviews={book.reviews} />` section
-- Render `<ReviewForm bookUid={uid} />` section
-- Edit button → navigates to `/books/{uid}/edit` (or opens inline form)
-- Delete button with confirmation dialog → `useDeleteBook().mutateAsync(uid)` → navigate to `/`
-
-### 3.6 Build books routes in `router.tsx`
-
-Add inside the `<ProtectedRoute>` children:
+Design decisions:
+- `const { uid } = useParams<{ uid: string }>()` (explicit generic required — see §2.5 note); `useBook(uid)` with `enabled: !!uid`.
+- States: `isLoading` → `<Loading />`; `isError` → `<ErrorMessage />` (covers 404 `book_not_found`).
+- Displays all backend fields; renders placeholders for `<TagChips />`, `<ReviewList />`, `<ReviewForm />` — wired in Phase 4.
+- **Edit** → `<Link to={/books/${uid}/edit}>`.
+- **Delete** → open the **inline `<ConfirmDialog />`** via `showDeleteConfirm` state; on confirm → `useDeleteBook().mutateAsync(uid)` → `navigate("/books")`; on cancel → close. No `window.confirm`.
 
 ```tsx
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { useState } from "react";
+import { Pencil, Trash2 } from "lucide-react";
+import { useBook, useDeleteBook } from "./queries";
+import Loading from "../../components/Loading";
+import ErrorMessage from "../../components/ErrorMessage";
+import ConfirmDialog from "../../components/ConfirmDialog";
+
+export default function BookDetailPage() {
+  const { uid } = useParams<{ uid: string }>();
+  const navigate = useNavigate();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const { data: book, isLoading, isError, error } = useBook(uid ?? "");
+
+  const deleteMutation = useDeleteBook();
+
+  async function handleDelete() {
+    setShowDeleteConfirm(false);
+    await deleteMutation.mutateAsync(uid!);
+    navigate("/books");
+  }
+
+  if (isLoading) return <Loading />;
+  if (isError || !book) return <ErrorMessage error={error} />;
+
+  return (
+    <div className="mx-auto max-w-2xl">
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-gray-900">{book.title}</h1>
+        <div className="flex gap-2">
+          <Link
+            to={`/books/${book.uid}/edit`}
+            className="inline-flex items-center gap-1 rounded-md bg-purple-600 px-3 py-2 text-sm font-semibold text-white hover:bg-purple-700"
+          >
+            <Pencil size={14} /> Edit
+          </Link>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="inline-flex items-center gap-1 rounded-md border border-red-300 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
+          >
+            <Trash2 size={14} /> Delete
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-2 rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-700">
+        <p><span className="font-medium">Author:</span> {book.author}</p>
+        <p><span className="font-medium">Publisher:</span> {book.publisher}</p>
+        <p><span className="font-medium">Pages:</span> {book.page_count}</p>
+        <p><span className="font-medium">Language:</span> {book.language}</p>
+        <p>
+          <span className="font-medium">Published:</span> {book.published_date}
+        </p>
+      </div>
+
+      {/* -- Phase 4: <TagChips bookUid={uid} tags={book.tags} /> -- */}
+      {/* -- Phase 4: <ReviewList reviews={book.reviews} /> -- */}
+      {/* -- Phase 4: <ReviewForm bookUid={uid} /> -- */}
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete book?"
+        message={`Are you sure you want to delete "${book.title}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        onCancel={() => setShowDeleteConfirm(false)}
+        onConfirm={handleDelete}
+      />
+    </div>
+  );
+}
+```
+
+### 3.6 Restructure `router.tsx` — mount `<ProtectedRoute />` + books routes — DETAILED SPEC
+
+`ProtectedRoute` (built in §2.8.4) is now mounted as a **pathless layout route** whose children are the books pages. Because `App` already renders `<Layout />` (NavBar + `<Outlet />`), the books pages get the NavBar automatically; `ProtectedRoute` adds the auth guard so unauthenticated visitors are redirected to `/login`.
+
+The auth routes remain **public** children of `App` (above the protected block). Full updated snapshot (`src/router.tsx`):
+
+```tsx
+import { createBrowserRouter } from "react-router-dom";
+import App from "./App";
+import ProtectedRoute from "./components/ProtectedRoute";
+import LoginPage from "./features/auth/LoginPage";
+import SignupPage from "./features/auth/SignupPage";
+import VerifyEmailPage from "./features/auth/VerifyEmailPage";
+import PasswordResetRequestPage from "./features/auth/PasswordResetRequestPage";
+import ResetAccountPassword from "./features/auth/ResetAccountPassword";
 import BooksListPage from "./features/books/BooksListPage";
 import BookDetailPage from "./features/books/BookDetailPage";
 import BookForm from "./features/books/BookForm";
 
-// Inside ProtectedRoute children:
-{ path: "books", element: <BooksListPage /> },
-{ path: "books/new", element: <BookForm mode="create" /> },
-{ path: "books/:uid", element: <BookDetailPage /> },
-{ path: "books/:uid/edit", element: <BookForm mode="edit" /> },
+export const router = createBrowserRouter([
+  {
+    path: "/",
+    element: <App />,
+    children: [
+      // Public auth routes
+      { path: "login", element: <LoginPage /> },
+      { path: "signup", element: <SignupPage /> },
+      { path: "/api/v1/auth/verify/:token", element: <VerifyEmailPage /> },
+      { path: "password-reset-request", element: <PasswordResetRequestPage /> },
+      {
+        path: "/api/v1/auth/password-reset-confirm/:token",
+        element: <ResetAccountPassword />,
+      },
+      // Protected books routes
+      {
+        element: <ProtectedRoute />,
+        children: [
+          { path: "books", element: <BooksListPage /> },
+          { path: "books/new", element: <BookForm mode="create" /> },
+          { path: "books/:uid", element: <BookDetailPage /> },
+          { path: "books/:uid/edit", element: <BookForm mode="edit" /> },
+        ],
+      },
+    ],
+  },
+]);
 ```
 
-### 3.7 Update NavBar to include Books link
+### 3.7 NavBar "Books" link — reconciliation note
 
-Add "Books" link in `<NavBar />` when authenticated, pointing to `/books`.
+The `NavBar` already renders a "Books" link pointing to `/books` (built in §2.8.3). No code change is needed here — §3.6's `/books` route is what now serves that link. Just confirm the link exists and that `/books` resolves to `BooksListPage` for an authenticated user (and redirects to `/login` otherwise).
+
+### 3.8 Verification — DETAILED SPEC
+
+1. `cd bookly-frontend && npx tsc --noEmit` — clean.
+2. `npm run lint` — clean.
+3. Manual smoke test (backend `fastapi dev src/` on :8000, frontend `npm run dev` on :5173):
+   - **Logged out:** visiting `/books` redirects to `/login` (ProtectedRoute). NavBar shows Login/Signup.
+   - **Login:** NavBar shows full name + Books + Logout.
+   - **List:** `/books` shows empty state "No books yet. Create your first book!". "Create Book" → `/books/new`.
+   - **Create:** submit valid form → redirects to `/books/{uid}` detail; back on `/books`, the new book is listed (newest first).
+   - **Edit:** on detail → Edit → `/books/{uid}/edit` prefilled → save → detail shows updated fields.
+   - **Delete dialog:** open Delete → **Cancel** closes with no change; open again → **Delete** → confirm dialog closes, navigates to `/books`, book gone.
+   - **Bad uid:** visit `/books/not-a-real-uid` → `<ErrorMessage />` shows "Book not found" (404).
+   - **Validation:** in the form, a non-positive `page_count` or missing required field shows inline validation and does not submit.
 
 ---
 
