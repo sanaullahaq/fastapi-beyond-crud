@@ -4,7 +4,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from src.books.schemas import BookCreate, BookUpdate
 from sqlmodel import select, desc
 from src.db.models import Book
-from datetime import datetime
 
 
 class BookService:
@@ -53,9 +52,6 @@ class BookService:
 
         new_book = Book(**book_data_dict)
 
-        new_book.published_date = datetime.strptime(
-            book_data_dict["published_date"], "%Y-%m-%d"
-        )
         new_book.user_uid = user_uid
 
         session.add(new_book)

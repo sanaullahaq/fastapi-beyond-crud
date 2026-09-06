@@ -21,7 +21,7 @@ class BookCreate(BookBase):
     This class is used to validate the request when creating a book
     """
 
-    published_date: str = "YYYY-MM-DD"
+    published_date: date
 
 
 class BookUpdate(BaseModel):
@@ -34,7 +34,7 @@ class BookUpdate(BaseModel):
     publisher: Optional[str] = None
     page_count: Optional[int] = None
     language: Optional[str] = None
-    published_date: Optional[str] = None
+    published_date: Optional[date] = None
 
 
 class BookOut(BookBase):
