@@ -2278,7 +2278,7 @@ Design decisions:
 - Client validation (submission guard, matches backend `BookBase`): all required; `page_count` must be a positive integer.
 - Submit: create → `useCreateBook().mutateAsync(data)` then `navigate(/books/${created.uid})`; edit → `useUpdateBook(bookUid).mutateAsync(data)` then `navigate(/books/${bookUid})`.
 - React 19: use `SyntheticEvent<HTMLFormElement>` for the submit handler (not the deprecated `FormEvent`).
-- Backend note: `published_date` is sent as a raw `"YYYY-MM-DD"` string; `BookUpdate` makes every field optional; `BookCreate.published_date` defaults to `"YYYY-MM-DD"`.
+- Backend note: `published_date` is sent as a raw `"YYYY-MM-DD"` ISO string. Backend input schemas now type it as `date` (`BookCreate.published_date: date` required, `BookUpdate.published_date: Optional[date]`) — Pydantic v2 coerces the ISO string at the validation boundary, so no manual `strptime` conversion exists in the service (create/update set it directly). Invalid formats get a clean 422. `BookUpdate` still makes every field optional.
 
 ```tsx
 import { useMutation, useQueryClient } from "@tanstack/react-query";
