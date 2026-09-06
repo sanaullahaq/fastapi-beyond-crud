@@ -48,17 +48,28 @@ class TestBookCreate:
             language="English",
             published_date="2024-01-15",
         )
-        assert data.published_date == "2024-01-15"
+        assert data.published_date == date(2024, 1, 15)
 
-    def test_default_published_date(self):
+    def test_coerces_iso_string_to_date(self):
         data = BookCreate(
             title="Test Book",
             author="Test Author",
             publisher="Test Publisher",
             page_count=200,
             language="English",
+            published_date="2024-01-15",
         )
-        assert data.published_date == "YYYY-MM-DD"
+        assert data.published_date == date(2024, 1, 15)
+
+    def test_missing_published_date_raises_error(self):
+        with pytest.raises(ValidationError):
+            BookCreate(
+                title="Test Book",
+                author="Test Author",
+                publisher="Test Publisher",
+                page_count=200,
+                language="English",
+            )
 
     def test_missing_title_raises_error(self):
         with pytest.raises(ValidationError):

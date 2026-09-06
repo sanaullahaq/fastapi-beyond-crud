@@ -16,8 +16,8 @@ class TestReviewBase:
             ReviewBase(rating=6, review_text="Too high")
 
     def test_rating_at_min(self):
-        data = ReviewBase(rating=0, review_text="Bad")
-        assert data.rating == 0
+        data = ReviewBase(rating=1, review_text="Bad")
+        assert data.rating == 1
 
     def test_missing_rating(self):
         with pytest.raises(ValidationError):
