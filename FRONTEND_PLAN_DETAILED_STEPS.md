@@ -68,6 +68,7 @@
   - [3.2 Create books queries/mutations (`src/features/books/queries.ts`) — DETAILED SPEC](#32-create-books-queriesmutations-srcfeaturesbooksqueriests--detailed-spec)
   - [3.3 Build `<BooksListPage />` — DETAILED SPEC](#33-build-bookslistpage---detailed-spec)
   - [3.4 Build `<BookForm />` — DETAILED SPEC](#34-build-bookform---detailed-spec)
+    - [3.4.1 Create `<BookEditPage />` (edit route wrapper)](#341-create-bookeditpage--edit-route-wrapper)
   - [3.5 Build `<ConfirmDialog />` + `<BookDetailPage />` — DETAILED SPEC](#35-build-confirmdialog---bookdetailpage---detailed-spec)
     - [3.5.1 `<ConfirmDialog />` (reusable shared component)](#351-confirmdialog--reusable-shared-component)
     - [3.5.2 `<BookDetailPage />`](#352-bookdetailpage-)
@@ -185,6 +186,7 @@ src/
       BooksListPage.tsx
       BookDetailPage.tsx
       BookForm.tsx          # Shared create/edit form component
+      BookEditPage.tsx      # Edit route wrapper — fetches book, composes <BookForm mode="edit" />
       api.ts                # Books axios calls
       queries.ts            # useBooks, useBook, useCreateBook, useUpdateBook, useDeleteBook
     reviews/
@@ -1809,7 +1811,7 @@ import ResetAccountPassword from "./features/auth/ResetAccountPassword";
 
 ### 2.8 Build shared components — DETAILED SPEC
 
-Four shared components live in `src/components/`. All four now exist on disk (synced from the codebase). `<Layout />` is **wired into `App.tsx`** (App renders `<Layout />`, so the NavBar + `main` + `<Outlet />` shell wraps every route). `<ProtectedRoute />` is created but **not yet mounted** — it gets added to the router in Phase 3 (§3.6). Until then the auth routes remain public children of `<App />`. A **fifth** shared component, `<ConfirmDialog />`, is added in Phase 3 §3.5 (reused there for book-delete and later in Phase 4 for review/tag confirmation).
+Four shared components live in `src/components/`. All four now exist on disk (synced from the codebase). `<Layout />` is **wired into `App.tsx`** (App renders `<Layout />`, so the NavBar + `main` + `<Outlet />` shell wraps every route). `<ProtectedRoute />` is built here and **mounted in Phase 3 §3.6** as a pathless layout route wrapping the books routes — until then the auth routes remain public children of `<App />`. A **fifth** shared component, `<ConfirmDialog />`, is added in Phase 3 §3.5 (reused there for book-delete and later in Phase 4 for review/tag confirmation).
 
 **Files touched:**
 
@@ -1998,7 +2000,7 @@ export default function App() {
 Consequences:
 - `NavBar` renders on all routes and switches between Login/Signup (logged out) and full-name + Books + Logout (logged in).
 - `<Layout />` is **not** referenced in `router.tsx` — the router still lists each auth route as a public child of `<App />` (§2.9 matches disk).
-- `<ProtectedRoute />` is created but **not yet mounted**. Only Phase 3 §3.6 nests the protected books pages under `ProtectedRoute` (inside `Layout`), and §3.7 finalizes the `NavBar` "Books" link target.
+- `<ProtectedRoute />` is created here and **mounted in Phase 3 §3.6** — that step nests the protected books pages under `ProtectedRoute` (inside `Layout`), and §3.7 finalizes the `NavBar` "Books" link target.
 
 #### 2.8.7 Verification
 
@@ -2130,15 +2132,16 @@ export const deleteBook = (uid: string) =>
 Design decisions:
 - `bookKeys` centralizes query-key identity so all hooks (and any manual invalidation) stay in sync.
 - `useBooks` reads the list; `useBook(uid)` guards with `enabled: !!uid` (same pattern as `useCurrentUser`).
+- `useBook` sets `retry: false` — a 404 on a detail fetch is deterministic (book deleted/not found); retrying a doomed query wastes a request.
 - Mutation `onSuccess` invalidations:
   - `useCreateBook` → invalidate `bookKeys.all` (list may have changed / sort order).
   - `useUpdateBook(uid)` → invalidate `bookKeys.all` **and** `bookKeys.detail(uid)`.
-  - `useDeleteBook` → invalidate `bookKeys.all`.
-- `mutationFn` here returns the axios promise directly (nothing reads `data` at hook level; pages unwrap where needed).
+  - `useDeleteBook` → invalidate `bookKeys.all` with `refetchType: "none"` — marks matched queries stale *without* fetching. The delete fires while still on the detail page, so refetching the just-deleted `["books", uid]` would 404 for nothing; the list refetches on next mount anyway.
+- `mutationFn` here returns the axios promise directly (nothing reads `data` at hook level; pages unwrap where needed). Mutations are called with `mutateAsync`.
 
 ```ts
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getBooks, getBook, createBook, updateBook, deleteBook } from "./api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createBook, deleteBook, getBook, getBooks, updateBook } from "./api";
 import type { BookCreate, BookUpdate } from "../../types/books";
 
 export const bookKeys = {
@@ -2163,8 +2166,10 @@ export const useBook = (uid: string) =>
       return data;
     },
     enabled: !!uid,
+    retry: false, // a 404 here is deterministic (book deleted/not found) — retrying won't fix it
   });
 
+// Mutations will be called with mutateAsync
 export const useCreateBook = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -2188,7 +2193,11 @@ export const useDeleteBook = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (uid: string) => deleteBook(uid),
-    onSuccess: () => qc.invalidateQueries({ queryKey: bookKeys.all }),
+    // refetchType: "none" marks matched queries stale WITHOUT fetching them.
+    // We're still on the detail page when this fires, so refetching the just-deleted
+    // ["books", uid] would 404 for no value; the list refetches on next mount anyway.
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: bookKeys.all, refetchType: "none" }),
   });
 };
 ```
@@ -2204,12 +2213,11 @@ Design decisions:
 - Page shell: the `Layout` (NavBar) already wraps all routes via `App`, so this page only renders its content column.
 
 ```tsx
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Plus } from "lucide-react";
 import { useBooks } from "./queries";
 import Loading from "../../components/Loading";
 import ErrorMessage from "../../components/ErrorMessage";
+import { Plus } from "lucide-react";
 
 export default function BooksListPage() {
   const { data: books, isLoading, isError, error } = useBooks();
@@ -2272,22 +2280,22 @@ export default function BooksListPage() {
 **File:** `src/features/books/BookForm.tsx`
 
 Design decisions:
-- A **single shared component** toggled by a `mode: "create" | "edit"` prop — no separate create/edit pages.
+- A **single shared component** toggled by a `mode: "create" | "edit"` prop — no separate create/edit pages. The edit **route** renders a thin `<BookEditPage />` wrapper (see §3.4.1) that fetches the book and mounts this form with `mode="edit"` + `initialData`.
 - Props: `mode`, `bookUid?: string` (edit only), `initialData?: BookUpdate` (edit only — used to prefill the controlled state).
-- Controlled fields: `title`, `author`, `publisher`, `page_count` (number), `language`, `published_date` (`<input type="date">`).
-- Client validation (submission guard, matches backend `BookBase`): all required; `page_count` must be a positive integer.
-- Submit: create → `useCreateBook().mutateAsync(data)` then `navigate(/books/${created.uid})`; edit → `useUpdateBook(bookUid).mutateAsync(data)` then `navigate(/books/${bookUid})`.
+- Controlled fields: `title`, `author`, `publisher`, `page_count` (number), `language`, `published_date` (`<input type="date">`). Both `page_count` and `published_date` are `required` (matches backend `BookCreate`).
+- Client validation (submission guard, matches backend `BookBase`): all required; `page_count` must be a positive integer — the invalid branch **`return`s** after setting the error so the form does not submit.
+- Hooks: `useCreateBook()` and `useUpdateBook(bookUid ?? "")` (the `?? ""` is a no-op in create mode). `const mutation = mode === "create" ? createMutation : updateMutation` — this alias is **render-state only**: both mutations expose the same `isPending`/`isError`/`error`, so the button/error display don't need to know which mutation it is. The **submit call must branch** (see the in-code comment): `mutation` is a union of `UseMutationResult<..., BookCreate> | UseMutationResult<..., BookUpdate>`, and calling a method on a union requires the argument to satisfy both signatures (`BookCreate & BookUpdate`) — so `mutation.mutateAsync(castCreate())` and `mutation.mutateAsync(castUpdate())` would both fail to typecheck.
+- Submit: create → `createMutation.mutateAsync(castCreate())` → `navigate(/books/${res.data?.uid})`; edit → `updateMutation.mutateAsync(castUpdate())` → `navigate(/books/${bookUid})`.
+- `castUpdate()` builds a partial body, dropping empty strings per field — a later scaling refactor can replace it with `Object.fromEntries` + filter.
 - React 19: use `SyntheticEvent<HTMLFormElement>` for the submit handler (not the deprecated `FormEvent`).
 - Backend note: `published_date` is sent as a raw `"YYYY-MM-DD"` ISO string. Backend input schemas now type it as `date` (`BookCreate.published_date: date` required, `BookUpdate.published_date: Optional[date]`) — Pydantic v2 coerces the ISO string at the validation boundary, so no manual `strptime` conversion exists in the service (create/update set it directly). Invalid formats get a clean 422. `BookUpdate` still makes every field optional.
 
 ```tsx
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, type ChangeEvent, type SyntheticEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { createBook, updateBook } from "./api";
-import { bookKeys } from "./queries";
-import ErrorMessage from "../../components/ErrorMessage";
 import type { BookCreate, BookUpdate } from "../../types/books";
+import { useState, type ChangeEvent, type SyntheticEvent } from "react";
+import { useCreateBook, useUpdateBook } from "./queries";
+import ErrorMessage from "../../components/ErrorMessage";
 
 export default function BookForm({
   mode,
@@ -2299,7 +2307,6 @@ export default function BookForm({
   initialData?: BookUpdate;
 }) {
   const navigate = useNavigate();
-  const qc = useQueryClient();
 
   const [form, setForm] = useState({
     title: initialData?.title ?? "",
@@ -2311,16 +2318,9 @@ export default function BookForm({
   });
 
   const [validationError, setValidationError] = useState<string | null>(null);
-
-  const mutation = useMutation({
-    mutationFn: async () =>
-      mode === "create"
-        ? createBook(castCreate())
-        : updateBook(bookUid!, castUpdate()),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: bookKeys.all });
-    },
-  });
+  const createMutation = useCreateBook();
+  const updateMutation = useUpdateBook(bookUid ?? "");
+  const mutation = mode === "create" ? createMutation : updateMutation;
 
   function castCreate(): BookCreate {
     return {
@@ -2330,6 +2330,7 @@ export default function BookForm({
     };
   }
 
+  //   This method will be scaled later
   function castUpdate(): BookUpdate {
     return {
       ...(form.title ? { title: form.title } : {}),
@@ -2348,21 +2349,37 @@ export default function BookForm({
 
   async function handleSubmit(e: SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
+
     const pageCount = Number(form.page_count);
+
     if (!form.title || !form.author || !form.publisher || !form.language) {
       setValidationError("All fields are required.");
       return;
     }
+
     if (!Number.isInteger(pageCount) || pageCount <= 0) {
-      setValidationError("Page count must be a positive integer.");
-      return;
+      setValidationError("Page count must be a positive integer");
+      return
     }
+
     setValidationError(null);
 
-    // mutationFn closes over `form`; mutateAsync() (no args) resolves to the
-    // axios response, so we can grab the created uid for the redirect.
-    const res = await mutation.mutateAsync();
-    const uid = mode === "create" ? res.data.uid : bookUid!;
+    const res = await (mode === "create"
+      ? createMutation.mutateAsync(castCreate())
+      : updateMutation.mutateAsync(castUpdate()));
+
+    // *** Why the alias can't be used for the submit call (why we can't use the `mutation` variable declared above) ***
+    //
+    //  createMutation and updateMutation have different payload types (BookCreate vs BookUpdate). mutation is their union:
+    //
+    //  UseMutationResult<AxiosResponse<BookOut>, Error, BookCreate>
+    //   | UseMutationResult<AxiosResponse<BookOut>, Error, BookUpdate>
+    //
+    // When you call a method on a union, TypeScript requires the argument to satisfy both signatures — i.e. BookCreate & BookUpdate.
+    // So mutation.mutateAsync(castCreate()) and mutation.mutateAsync(castUpdate()) both fail to typecheck (or silently coerce in unhappy ways).
+    // That's precisely why handleSubmit must branch and call each mutateAsync with its own typed payload.
+
+    const uid = mode === "create" ? res.data?.uid : bookUid!;
     navigate(`/books/${uid}`);
   }
 
@@ -2406,29 +2423,28 @@ export default function BookForm({
             />
           </div>
         ))}
-
         <div>
           <label className="block text-sm font-medium text-gray-700">
-            Page count
+            Page Count
           </label>
           <input
             type="number"
             min={1}
-            value={form.page_count}
+            value={form["page_count"]}
             onChange={update("page_count")}
             required
             className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
           />
         </div>
-
         <div>
           <label className="block text-sm font-medium text-gray-700">
-            Published date
+            Published Date
           </label>
           <input
             type="date"
-            value={form.published_date}
+            value={form["published_date"]}
             onChange={update("published_date")}
+            required
             className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
           />
         </div>
@@ -2436,6 +2452,7 @@ export default function BookForm({
         <button
           type="submit"
           disabled={mutation.isPending}
+          aria-busy={mutation.isPending}
           className="w-full rounded-md bg-purple-600 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {mutation.isPending
@@ -2452,6 +2469,35 @@ export default function BookForm({
 }
 ```
 
+#### 3.4.1 Create `<BookEditPage />` (edit route wrapper)
+
+**File:** `src/features/books/BookEditPage.tsx`
+
+Rationale — one route ↔ one page component: the `books/:uid/edit` route renders `<BookEditPage />`, which owns the data fetch and loading/error gates, then composes the presentational `<BookForm mode="edit" />`. This keeps `BookForm` purely presentational + controlled (no data fetching), and the wrapper is trivial enough that `BookDetailPage`'s `useBook(uid)` cache is reused for the edit form's prefill (same query key → no extra network call).
+
+```tsx
+import { Navigate, useParams } from "react-router-dom";
+import { useBook } from "./queries";
+import Loading from "../../components/Loading";
+import ErrorMessage from "../../components/ErrorMessage";
+import BookForm from "./BookForm";
+
+export default function BookEditPage() {
+  const { uid } = useParams<{ uid: string }>();
+  const { data: book, isLoading, isError, error } = useBook(uid ?? "");
+  if (!uid) return <Navigate to="/books" replace />;
+  if (isLoading) return <Loading />;
+  if (isError || !book) return <ErrorMessage error={error} />;
+  return <BookForm mode="edit" bookUid={uid} initialData={book} />;
+}
+```
+
+Design decisions:
+- `useParams<{ uid: string }>()` with the explicit generic (React Router can't infer it).
+- `!uid` → `Navigate to="/books"` replaces the (impossible-in-practice) missing-param route; it also lets `bookUid={uid}` avoid a non-null assertion.
+- Data guard `isError || !book` matches `BookDetailPage`; `BookDetailOut` is structurally assignable to `BookUpdate`, so `initialData={book}` typechecks directly.
+- Edit-route change only — the create route keeps rendering `<BookForm mode="create" />` directly (nothing to fetch).
+
 ### 3.5 Build `<ConfirmDialog />` + `<BookDetailPage />` — DETAILED SPEC
 
 Phase 3 adds the **fifth shared component** `<ConfirmDialog />` (reused later in Phase 4 for review/tag deletes) and uses it on `BookDetailPage` for the delete action.
@@ -2466,7 +2512,8 @@ Props:
 - `message?: string` — optional body text.
 - `confirmLabel?: string` — confirm button text (default `"Confirm"`).
 - `onCancel: () => void`, `onConfirm: () => void`.
-- Accessible: `role="dialog" aria-modal="true"`, fixed full-screen overlay, focus on the confirm button.
+- Accessible: `role="dialog" aria-modal="true"`, fixed full-screen overlay, focus moves to the confirm button on open.
+- Pressing **Escape** cancels the dialog (document-level `keydown` listener, active only while `open`).
 
 ```tsx
 import { useEffect, useRef } from "react";
@@ -2488,9 +2535,32 @@ export default function ConfirmDialog({
 }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
 
+  /**
+    creates a ref that will hold a reference to the actual "Confirm" <button> DOM element — but before rendering, useRef(null) starts it as null, and the .current gets populated only after the button mounts.
+    
+    Why it's there (the intent): it's the standard pattern for focus management in a modal dialog. When the dialog opens, you want keyboard focus to move into the dialog (usability/accessibility best practice), not stay on the page behind it. The typical usage is a useEffect that runs when open becomes true and calls confirmRef.current?.focus():
+    
+    useEffect(() => {
+       if (open) confirmRef.current?.focus();
+     }, [open]);
+    
+     Why the Confirm button specifically: the safest, most predictable focus target is the least-destructive action — so users who press Enter/Space don't accidentally trigger the destructive delete. Many dialogs focus Cancel instead for that reason. But focusing Confirm (or whichever button you pick) is a deliberate, common choice.
+     
+    */
+
   useEffect(() => {
     if (open) confirmRef.current?.focus();
   }, [open]);
+
+  // Cancel the dialog on pressing "esc"
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, onCancel]);
 
   if (!open) return null;
 
@@ -2530,33 +2600,38 @@ export default function ConfirmDialog({
 **File:** `src/features/books/BookDetailPage.tsx`
 
 Design decisions:
-- `const { uid } = useParams<{ uid: string }>()` (explicit generic required — see §2.5 note); `useBook(uid)` with `enabled: !!uid`.
-- States: `isLoading` → `<Loading />`; `isError` → `<ErrorMessage />` (covers 404 `book_not_found`).
+- `const { uid } = useParams<{ uid: string }>()` (explicit generic required — see §2.5 note); `useBook(uid ?? "")` with `enabled: !!uid` (via the hook) and `retry: false`.
+- `if (!uid) return <Navigate to="/books" replace />` guards the param; `handleDelete` then takes `bookUid: string` as a parameter (avoids a non-null assertion — TS doesn't reliably carry an early-return narrowing into a closure).
+- A **"← Back to books"** link (`ArrowLeft`) sits above the header.
+- States: `isLoading` → `<Loading />`; `isError || !book` → `<ErrorMessage error={error} />` (covers 404 `book_not_found`).
+- Delete errors surface **full-width above the header** (not as a flex item beside the heading/buttons) via `deleteMutation.isError`.
 - Displays all backend fields; renders placeholders for `<TagChips />`, `<ReviewList />`, `<ReviewForm />` — wired in Phase 4.
-- **Edit** → `<Link to={/books/${uid}/edit}>`.
-- **Delete** → open the **inline `<ConfirmDialog />`** via `showDeleteConfirm` state; on confirm → `useDeleteBook().mutateAsync(uid)` → `navigate("/books")`; on cancel → close. No `window.confirm`.
+- **Edit** → `<Link to={/books/${book.uid}/edit}>` (edit route renders `<BookEditPage />`, §3.4.1).
+- **Delete** → open the **inline `<ConfirmDialog />`** via `showDeleteConfirmDialog` state; on confirm → `useDeleteBook().mutateAsync(uid)` → `navigate("/books")`; on cancel or **Escape** → close. No `window.confirm`. `useDeleteBook` invalidates with `refetchType: "none"`, so the stale detail query isn't refetched to a 404; the list refetches on mount.
 
 ```tsx
-import { Link, useNavigate, useParams } from "react-router-dom";
 import { useState } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useBook, useDeleteBook } from "./queries";
 import Loading from "../../components/Loading";
 import ErrorMessage from "../../components/ErrorMessage";
+import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog";
 
 export default function BookDetailPage() {
   const { uid } = useParams<{ uid: string }>();
   const navigate = useNavigate();
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteConfirmDialog, setShowDeleteConfirm] = useState(false);
 
   const { data: book, isLoading, isError, error } = useBook(uid ?? "");
 
   const deleteMutation = useDeleteBook();
 
-  async function handleDelete() {
+  if (!uid) return <Navigate to="/books" replace />;
+
+  async function handleDelete(bookUid: string) {
     setShowDeleteConfirm(false);
-    await deleteMutation.mutateAsync(uid!);
+    await deleteMutation.mutateAsync(bookUid);
     navigate("/books");
   }
 
@@ -2565,6 +2640,19 @@ export default function BookDetailPage() {
 
   return (
     <div className="mx-auto max-w-2xl">
+      <Link
+        to="/books"
+        className="mb-4 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-purple-700"
+      >
+        <ArrowLeft size={14} /> Back to books
+      </Link>
+
+      {deleteMutation.isError && (
+        <div className="mb-4">
+          <ErrorMessage error={deleteMutation.error} />
+        </div>
+      )}
+
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-gray-900">{book.title}</h1>
         <div className="flex gap-2">
@@ -2582,28 +2670,39 @@ export default function BookDetailPage() {
           </button>
         </div>
       </div>
-
       <div className="space-y-2 rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-700">
-        <p><span className="font-medium">Author:</span> {book.author}</p>
-        <p><span className="font-medium">Publisher:</span> {book.publisher}</p>
-        <p><span className="font-medium">Pages:</span> {book.page_count}</p>
-        <p><span className="font-medium">Language:</span> {book.language}</p>
         <p>
-          <span className="font-medium">Published:</span> {book.published_date}
+          <span className="font-medium">Author: </span>
+          {book.author}
+        </p>
+        <p>
+          <span className="font-medium">Publisher: </span>
+          {book.publisher}
+        </p>
+        <p>
+          <span className="font-medium">Pages: </span>
+          {book.page_count}
+        </p>
+        <p>
+          <span className="font-medium">Language: </span>
+          {book.language}
+        </p>
+        <p>
+          <span className="font-medium">Published: </span>
+          {book.published_date}
         </p>
       </div>
-
       {/* -- Phase 4: <TagChips bookUid={uid} tags={book.tags} /> -- */}
-      {/* -- Phase 4: <ReviewList reviews={book.reviews} /> -- */}
+      {/* -- Phase 4: <ReviewList reviews={book.reviews} -- /> */}
       {/* -- Phase 4: <ReviewForm bookUid={uid} /> -- */}
 
       <ConfirmDialog
-        open={showDeleteConfirm}
+        open={showDeleteConfirmDialog}
         title="Delete book?"
-        message={`Are you sure you want to delete "${book.title}"? This cannot be undone.`}
+        message={`Are you sure you want to delete "${book.title}"? This can't be undone.`}
         confirmLabel="Delete"
         onCancel={() => setShowDeleteConfirm(false)}
-        onConfirm={handleDelete}
+        onConfirm={() => handleDelete(uid)}
       />
     </div>
   );
@@ -2614,12 +2713,11 @@ export default function BookDetailPage() {
 
 `ProtectedRoute` (built in §2.8.4) is now mounted as a **pathless layout route** whose children are the books pages. Because `App` already renders `<Layout />` (NavBar + `<Outlet />`), the books pages get the NavBar automatically; `ProtectedRoute` adds the auth guard so unauthenticated visitors are redirected to `/login`.
 
-The auth routes remain **public** children of `App` (above the protected block). Full updated snapshot (`src/router.tsx`):
+The auth routes remain **public** children of `App` (above the protected block). Books routes use **absolute** paths (`/books`, `/books/new`, `/books/:uid`, `/books/:uid/edit`) and the create route renders `<BookForm mode="create" />` directly while the edit route renders the `<BookEditPage />` wrapper (fetches the book, then composes `<BookForm mode="edit" />` — §3.4.1). Full updated snapshot (`src/router.tsx`):
 
 ```tsx
 import { createBrowserRouter } from "react-router-dom";
 import App from "./App";
-import ProtectedRoute from "./components/ProtectedRoute";
 import LoginPage from "./features/auth/LoginPage";
 import SignupPage from "./features/auth/SignupPage";
 import VerifyEmailPage from "./features/auth/VerifyEmailPage";
@@ -2628,6 +2726,8 @@ import ResetAccountPassword from "./features/auth/ResetAccountPassword";
 import BooksListPage from "./features/books/BooksListPage";
 import BookDetailPage from "./features/books/BookDetailPage";
 import BookForm from "./features/books/BookForm";
+import ProtectedRoute from "./components/ProtectedRoute";
+import BookEditPage from "./features/books/BookEditPage";
 
 export const router = createBrowserRouter([
   {
@@ -2643,14 +2743,15 @@ export const router = createBrowserRouter([
         path: "/api/v1/auth/password-reset-confirm/:token",
         element: <ResetAccountPassword />,
       },
-      // Protected books routes
+
+      //Protected books routes
       {
         element: <ProtectedRoute />,
         children: [
-          { path: "books", element: <BooksListPage /> },
-          { path: "books/new", element: <BookForm mode="create" /> },
-          { path: "books/:uid", element: <BookDetailPage /> },
-          { path: "books/:uid/edit", element: <BookForm mode="edit" /> },
+          { path: "/books", element: <BooksListPage /> },
+          { path: "/books/new", element: <BookForm mode="create" /> },
+          { path: "/books/:uid", element: <BookDetailPage /> },
+          { path: "/books/:uid/edit", element: <BookEditPage /> },
         ],
       },
     ],
@@ -2672,7 +2773,8 @@ The `NavBar` already renders a "Books" link pointing to `/books` (built in §2.8
    - **List:** `/books` shows empty state "No books yet. Create your first book!". "Create Book" → `/books/new`.
    - **Create:** submit valid form → redirects to `/books/{uid}` detail; back on `/books`, the new book is listed (newest first).
    - **Edit:** on detail → Edit → `/books/{uid}/edit` prefilled → save → detail shows updated fields.
-   - **Delete dialog:** open Delete → **Cancel** closes with no change; open again → **Delete** → confirm dialog closes, navigates to `/books`, book gone.
+   - **Delete dialog:** open Delete → **Cancel** closes with no change; open again → **Delete** → confirm dialog closes, navigates to `/books`, book gone. Open → **Escape** → dialog cancels, nothing deleted.
+   - **Back link:** detail page has "← Back to books" (top-left) → `/books`.
    - **Bad uid:** visit `/books/not-a-real-uid` → `<ErrorMessage />` shows "Book not found" (404).
    - **Validation:** in the form, a non-positive `page_count` or missing required field shows inline validation and does not submit.
 
