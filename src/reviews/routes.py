@@ -1,3 +1,5 @@
+from typing import List
+
 from fastapi import APIRouter, Depends, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -5,7 +7,7 @@ from src.auth.dependencies import RoleChecker, get_current_user
 from src.db.main import get_session
 from src.db.models import User
 from src.errors import InsufficientPermission, ReviewNotFound
-from src.reviews.schemas import ReviewCreate
+from src.reviews.schemas import ReviewCreate, ReviewOut
 from src.reviews.service import ReviewService
 
 review_router = APIRouter()
@@ -16,16 +18,20 @@ admin_role_checker = Depends(RoleChecker(["admin"]))
 user_role_checker = Depends(RoleChecker(["user", "admin"]))
 
 
-@review_router.get("/", dependencies=[admin_role_checker])
+@review_router.get(
+    "/", dependencies=[admin_role_checker], response_model=List[ReviewOut]
+)
 async def get_all_reviews(session: AsyncSession = Depends(get_session)):
     reviews = await review_service.get_all_reviews(session=session)
     return reviews
 
 
-@review_router.get("/{review_uid}", dependencies=[user_role_checker])
+@review_router.get(
+    "/{review_uid}", dependencies=[user_role_checker], response_model=ReviewOut
+)
 async def get_review(review_uid: str, session: AsyncSession = Depends(get_session)):
     review = await review_service.get_review(review_uid=review_uid, session=session)
-    
+
     if review:
         return review
     else:
