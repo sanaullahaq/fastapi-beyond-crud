@@ -162,16 +162,6 @@ def register_all_errors(app: FastAPI):
         ),
     )
     app.add_exception_handler(
-        BookNotFound,
-        create_exception_handler(
-            status_code=status.HTTP_404_NOT_FOUND,
-            initial_detail={
-                "message": "Book not found",
-                "error_code": "book_not_found",
-            },
-        ),
-    )
-    app.add_exception_handler(
         InvalidCredentials,
         create_exception_handler(
             status_code=status.HTTP_400_BAD_REQUEST,
