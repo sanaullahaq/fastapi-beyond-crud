@@ -34,3 +34,6 @@ async_session = async_sessionmaker(
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async with async_session() as session:
         yield session
+
+
+# A detailed note about `sqlalchemy-session-methods` and `expire_on_commit` params written into /notes/sqlalchemy-session-methods.md
