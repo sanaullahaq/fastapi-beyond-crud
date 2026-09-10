@@ -54,6 +54,10 @@ class ReviewNotFound(BooklyException):
     """Review Not found"""
 
 
+class ReviewAlreadyExists(BooklyException):
+    """Review Already Exists"""
+
+
 class TagAlreadyExists(BooklyException):
     """Tag already exists"""
 
@@ -205,6 +209,16 @@ def register_all_errors(app: FastAPI):
                 "error_code": "review_not_found",
             },
         ),
+    )
+    app.add_exception_handler(
+        ReviewAlreadyExists,
+        create_exception_handler(
+            status_code=status.HTTP_409_CONFLICT,
+            initial_detail={
+                "message": "Review Already Exists From The Current User",
+                "error_code": "review_already_exists"
+            }
+        )
     )
 
     app.add_exception_handler(

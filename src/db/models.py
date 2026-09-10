@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from typing import List, Optional
-from sqlmodel import Relationship, SQLModel, Field, Column
+from sqlmodel import Relationship, SQLModel, Field, Column, UniqueConstraint
 import sqlalchemy.dialects.postgresql as pg
 import uuid
 
@@ -149,10 +149,14 @@ class Book(SQLModel, table=True):
 class Review(SQLModel, table=True):
     __tablename__: str = "reviews"
 
+    __table_args__ = (
+        UniqueConstraint("user_uid", "book_uid", name="uq_reviews_book_user"),
+    )
+
     uid: uuid.UUID = Field(
         sa_column=Column(pg.UUID, primary_key=True, nullable=False, default=uuid.uuid4)
     )
-    rating: int = Field(le=5)
+    rating: int = Field(ge=1, le=5)
     review_text: str = Field(sa_column=Column(pg.VARCHAR, nullable=False))
     user_uid: Optional[uuid.UUID] = Field(default=None, foreign_key="users.uid")
     book_uid: Optional[uuid.UUID] = Field(default=None, foreign_key="books.uid")
@@ -168,4 +172,4 @@ class Review(SQLModel, table=True):
     # "reviews" = Book's attribute name
 
     def __repr__(self) -> str:
-        return f"Review for book {self.book_uid} by user {self.user_uid}"
+        return f"Review {self.uid} for book {self.book_uid} by user {self.user_uid}"
